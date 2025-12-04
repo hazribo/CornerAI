@@ -4,7 +4,7 @@ import pandas as pd
 import os
 import warnings
 import logging
-import time
+import shutil
 
 logging.getLogger("fastf1").setLevel(logging.CRITICAL)
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -35,7 +35,8 @@ for year in YEARS:
         try:
             all_data.append(quali.laps)
             print(f"Loaded {year} {event.EventName}.")
-            #time.sleep(1) # might help rate limits?
         except Exception as e:
             print(f"Could not load {year} {event.EventName}. Reason: {e}")
+            # Delete potentially corrupted cache folder:
+            shutil.rmtree(cache_dir + f"{year}/{year}-{event.EventDate.strftime('%m-%d')}_{event.EventName.replace(' ', '_')}")
             continue
