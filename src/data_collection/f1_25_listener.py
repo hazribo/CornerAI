@@ -17,6 +17,7 @@ print ("Listening on " + UDP_IP + ":" + str(UDP_PORT))
 
 current_lap = 0
 lap_data = []
+assists = list(range(5)) # list of bools?
 session_dir = None
 recording = False
 
@@ -35,6 +36,20 @@ while True:
     packet_format = header[0] # m_packetFormat (always = 2025)
     packet_id = header[5] # m_packetId
     player_car_index = header[10] # m_playerCarIndex
+
+    if packet_id == 1: # 753 bytes total
+        player_offset = HEADER_SIZE + (player_car_index * 103)
+        if len(data) >= player_offset + 103:
+            lap_info = struct.unpack("<BbbBHBbBHHBBBBBBfbBBBBBBbbbbBBBIIIBBBBBBBBBBBBBBIBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBff", data[player_offset:player_offset+103])
+            
+            #Assist settings:
+            assists = [
+                bool(lap_info[29] == 1),  # m_antiLockBrakes
+                bool(lap_info[30] == 1),  # m_tractionControl
+                bool(lap_info[31] == 1),  # m_dynamicRacingLine
+                bool(lap_info[34] == 1),  # m_autoGearbox
+                bool(lap_info[35] == 1)   # m_manualClutch
+            ]
 
     # ePacketIdLapData - data about all the lap times of cars in the session
     if packet_id == 2: # 1285 bytes total
@@ -66,6 +81,7 @@ while True:
                         "lap_number": current_lap,
                         "lap_time": lap_time,
                         "data_points": len(lap_data),
+                        "assists": assists,
                         "telemetry": lap_data
                     }, f, indent=2)
                 print(f"Saved lap {current_lap} with {len(lap_data)} points")
@@ -81,13 +97,23 @@ while True:
             telemetry_info = struct.unpack("<HfffBbHBBHHBBHfB", data[player_offset:player_offset+33])
 
             telemetry_data = {
-            "speed": telemetry_info[0],
-            "throttle": telemetry_info[1],
-            "steering_angle": telemetry_info[2],
-            "brake": telemetry_info[3],
-            "gear": telemetry_info[5],
-            "drs": telemetry_info[7]
+                "speed": telemetry_info[0],
+                "throttle": telemetry_info[1],
+                "steering_angle": telemetry_info[2],
+                "brake": telemetry_info[3],
+                "gear": telemetry_info[5],
+                "drs": telemetry_info[7]
             }
             lap_data.append(telemetry_data)
 
-    
+    if packet_id == 0 and recording: # 1349 bytes total
+        player_offset = HEADER_SIZE + (player_car_index * 60)
+        if len(data) >= player_offset + 60:
+            telemetry_info = struct.unpack("<ffffffhhhhhhffffff", data[player_offset:player_offset+60])
+
+        telemetry_data = {
+            "x_pos": telemetry_info[0],
+            "y_pos": telemetry_info[1],
+            "z_pos": telemetry_info[2]
+        }
+        lap_data.append(telemetry_data)
