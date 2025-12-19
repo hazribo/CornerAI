@@ -1,5 +1,4 @@
 import socket
-import os
 import struct
 from datetime import datetime
 from pathlib import Path
@@ -20,6 +19,7 @@ lap_data = []
 assists = list(range(5)) # list of bools?
 session_dir = None
 recording = False
+last_lap_distance = 0.0
 
 def ms_to_timestamp(ms: int) -> str:
     minutes, rem = divmod(ms, 60_000)
@@ -35,20 +35,20 @@ while True:
     header = struct.unpack("<HBBBBBQfIIBB", data[:HEADER_SIZE])
     packet_format = header[0] # m_packetFormat (always = 2025)
     packet_id = header[5] # m_packetId
-    player_car_index = header[10] # m_playerCarIndex
+    player_car_index = header[10] # m_playerCarIndex - to get data for the user, not CPU 
 
-    if packet_id == 1: # 753 bytes total
-        player_offset = HEADER_SIZE + (player_car_index * 103)
-        if len(data) >= player_offset + 103:
-            lap_info = struct.unpack("<BbbBHBbBHHBBBBBBfbBBBBBBbbbbBBBIIIBBBBBBBBBBBBBBIBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBff", data[player_offset:player_offset+103])
+    if packet_id == 1: # Session - 753 bytes total
+        if len(data) >= HEADER_SIZE + 724:
+            # Assist settings are at bytes 657-664 in the session data after header:
+            assists_data = struct.unpack("<BBBBBBBB", data[HEADER_SIZE+657:HEADER_SIZE+665])
             
-            #Assist settings:
             assists = [
-                bool(lap_info[29] == 1),  # m_antiLockBrakes
-                bool(lap_info[30] == 1),  # m_tractionControl
-                bool(lap_info[31] == 1),  # m_dynamicRacingLine
-                bool(lap_info[34] == 1),  # m_autoGearbox
-                bool(lap_info[35] == 1)   # m_manualClutch
+                bool(assists_data[0]),  # m_steeringAssist
+                bool(assists_data[1]),  # m_brakingAssist
+                bool(assists_data[2]),  # m_gearboxAssist
+                bool(assists_data[5]),  # m_ERSAssist
+                bool(assists_data[6]),  # m_DRSAssist
+                bool(assists_data[7])   # m_dynamicRacingLine
             ]
 
     # ePacketIdLapData - data about all the lap times of cars in the session
@@ -60,6 +60,7 @@ while True:
             
             lap_number = lap_info[14]  # m_currentLapNum
             lap_time = ms_to_timestamp(lap_info[0])
+            lap_distance = lap_info[10]  # m_lapDistance
 
             # New directory for each new session (i.e. on file run or on lap 1):
             if session_dir is None:
@@ -72,6 +73,10 @@ while True:
                 session_dir.mkdir(parents=True, exist_ok=True)
                 lap_data = []
                 print("New session started.")
+            if lap_number == current_lap and lap_distance < last_lap_distance - 500:
+                lap_data = []
+                print(f"Lap {lap_number} restarted - cleared telemetry")
+            last_lap_distance = lap_distance
 
             if lap_number > current_lap and current_lap > 0:
                 filename = session_dir / f"lap_{current_lap}.json"
@@ -106,14 +111,14 @@ while True:
             }
             lap_data.append(telemetry_data)
 
-    if packet_id == 0 and recording: # 1349 bytes total
+    if packet_id == 0 and recording:  # Motion Data packet
         player_offset = HEADER_SIZE + (player_car_index * 60)
         if len(data) >= player_offset + 60:
             telemetry_info = struct.unpack("<ffffffhhhhhhffffff", data[player_offset:player_offset+60])
 
-        telemetry_data = {
-            "x_pos": telemetry_info[0],
-            "y_pos": telemetry_info[1],
-            "z_pos": telemetry_info[2]
-        }
-        lap_data.append(telemetry_data)
+            telemetry_data = {
+                "x_pos": telemetry_info[0],
+                "y_pos": telemetry_info[1],
+                "z_pos": telemetry_info[2]
+            }
+            lap_data.append(telemetry_data)
