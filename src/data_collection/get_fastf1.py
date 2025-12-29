@@ -1,6 +1,4 @@
 import fastf1 as ff1
-import numpy as np
-import pandas as pd
 import os
 import warnings
 import logging
