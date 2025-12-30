@@ -10,9 +10,10 @@ def clean(filepath):
     df = pd.DataFrame()
     
     df["distance"] = df_raw["Distance"]
-    df["x"] = df_raw["X"]
-    df["y"] = df_raw["Y"]
-    df["z"] = df_raw["Z"]
+    # Convert x, y, z from decimetres to metres:
+    df["x"] = df_raw["X"] / 1000
+    df["y"] = df_raw["Y"] / 1000
+    df["z"] = df_raw["Z"] / 1000
     df["speed"] = df_raw["Speed"] # km/h
     # Normalise throttle, brake to 0-1:
     df["throttle"] = df_raw["Throttle"].apply(lambda x: 1.0 if x > 95 else 0.0)
