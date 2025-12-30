@@ -11,8 +11,8 @@ def clean(filepath):
     
     df["distance"] = df_raw["lapdistance [m]"]
     df["x"] = df_raw["x [m]"]
-    df["y"] = df_raw["y [m]"]
-    df["z"] = df_raw["z [m]"]
+    df["y"] = df_raw["z [m]"]
+    df["z"] = df_raw["y [m]"]
     df["speed"] = df_raw["speed [m/s]"]
     # Normalise throttle, brake, steering to 0-1:
     df["throttle"] = df_raw["throttle [%]"].astype(float) / 100.0
