@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from pathlib import Path
 
 FASTF1_DIR = Path(__file__).resolve().parents[2] / "data" / "raw" / "historical" / "csv"
@@ -12,7 +13,7 @@ def clean(filepath):
     df["distance"] = df_raw["Distance"]
     # Convert x, y, z from decimetres to metres:
     df["x"] = df_raw["X"] / 10
-    df["y"] = df_raw["Z"] / 10
+    df["y"] = df_raw["Z"] / 10 # swap y and z
     df["z"] = df_raw["Y"] / 10
     df["speed"] = df_raw["Speed"] # km/h
     # Normalise throttle, brake to 0-1:
@@ -21,11 +22,36 @@ def clean(filepath):
     df["gear"] = df_raw["nGear"]
     df["drs"] = df_raw["DRS"].apply(lambda x: 1.0 if x == 12 else 0.0)
     df["rpm"] = df_raw["RPM"]
+
     if "Time" in df_raw.columns:
-        try:
-            df["time"] = pd.to_timedelta(df_raw["Time"]).dt.total_seconds()
-        except:
-            df["time"] = 0.0
+        td = pd.to_timedelta(df_raw["Time"], errors="coerce")
+        time_s = td.dt.total_seconds()
+        if time_s.isna().all():
+            time_s = pd.to_numeric(df_raw["Time"], errors="coerce")
+        df["time"] = time_s
+
+        df = df.sort_values("time").reset_index(drop=True)
+        t = df["time"].to_numpy(dtype=float)
+        for i in range(1, t.size):
+            if t[i] <= t[i - 1]:
+                t[i] = t[i - 1] + 1e-6
+        df["time"] = t
+
+        dt = 0.05  # 20 hz - same as f125
+        new_t = np.arange(float(df["time"].iloc[0]), float(df["time"].iloc[-1]) + 1e-9, dt, dtype=float)
+        out = pd.DataFrame({"time": new_t})
+
+        base = df[["time","distance","x","y","z","speed","throttle","brake","rpm"]].copy()
+        base = base.sort_values("time")
+
+        for c in ["distance","x","y","z","speed","throttle","brake","rpm"]:
+            out[c] = np.interp(new_t, base["time"].to_numpy(), base[c].to_numpy())
+
+        disc = df[["time","gear","drs"]].sort_values("time")
+        out = pd.merge_asof(out, disc, on="time", direction="backward")
+        out["gear"] = out["gear"].round().astype("Int64")
+        out["drs"] = out["drs"].fillna(0).astype(float)
+        df = out
 
     df = df.sort_values("distance").reset_index(drop=True)
     df["source"] = "fastf1"

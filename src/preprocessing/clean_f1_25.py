@@ -8,18 +8,21 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 def clean(filepath):
     df_raw = pd.read_csv(filepath, skiprows=7, header=0) # first 7 rows are metadata from Telemetry Tool
     df = pd.DataFrame()
+
     
     df["distance"] = df_raw["lapdistance [m]"]
     df["x"] = df_raw["x [m]"]
-    df["y"] = df_raw["z [m]"]
+    df["y"] = df_raw["z [m]"] # swap y and z
     df["z"] = df_raw["y [m]"]
-    df["speed"] = df_raw["speed [m/s]"]
+    df["speed"] = df_raw["speed [m/s]"] # it says m/s but it's in km/h? weird telemetry tool issue
     # Normalise throttle, brake, steering to 0-1:
     df["throttle"] = df_raw["throttle [%]"].astype(float) / 100.0
     df["brake"] = df_raw["brake [%]"].astype(float) / 100.0
-    # No steering in other dataset? don't include for now.
-    # df["steer"] = df_raw["steer [%]"].astype(float) / 100.0
-    # Gear & RPM likely won't matter, but is collected by Telemetry Tool:
+
+    # No steering in ff1 dataset... so don't include for now here:
+    #df["steer"] = df_raw["steer [%]"].astype(float) / 100.0
+    # uncomment at a later date if steering info can be gathered from ff1.
+
     df["gear"] = df_raw["gear [int]"]
     df["drs"] = df_raw["drs"]
     df["rpm"] = df_raw["revs [int]"]
