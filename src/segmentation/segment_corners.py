@@ -1,17 +1,45 @@
+import re
 import pandas as pd
-import json
+import yaml
 from pathlib import Path
 
 F125_PROCESSED_DIR = Path(__file__).resolve().parents[2] / "data" / "processed" / "f1-25" / "laps"
 HISTORICAL_PROCESSED_DIR = Path(__file__).resolve().parents[2] / "data" / "processed" / "historical"
-CORNER_JSON_DIR = Path(__file__).resolve().parents[2] / "data" / "corner_info" 
+CORNER_INFO_DIR = Path(__file__).resolve().parents[2] / "data" / "corner_info"
+CORNER_STATS_DIR = Path(__file__).resolve().with_name("corner_stats.yaml")
 
-def load_laps(min_year = None):
+TRACK_ALIASES = {
+    "australian_grand_prix": "australia",
+    # tbd
+}
+
+# normalise track name for easy lookup:
+def _norm_track_name(name):
+    s = str(name or "").strip().lower()
+    s = re.sub(r"\s+", "_", s)
+    return s
+
+# get track alias:
+def _resolve_track_key(track):
+    norm = _norm_track_name(track)
+    return TRACK_ALIASES.get(norm, norm)
+
+# get correct year for track layout:
+def _get_track_layout(available_years, requested_year):
+    if not available_years:
+        raise KeyError(f"No available data for this track layout.")
+    years = sorted(set(int(y) for y in available_years))
+    if requested_year in years:
+        return requested_year
+    past = [y for y in years if y <= requested_year]
+    return max(past) if past else max(years)
+
+def load_laps(min_year=None):
     frames: list[pd.DataFrame] = []
+
     if F125_PROCESSED_DIR.exists():
         for track_dir in sorted([p for p in F125_PROCESSED_DIR.iterdir() if p.is_dir()]):
-            csvs = sorted(track_dir.rglob("*.csv"))
-            for fp in csvs:
+            for fp in sorted(track_dir.rglob("*.csv")):
                 try:
                     df = pd.read_csv(fp)
                     df["track"] = track_dir.name
@@ -19,16 +47,14 @@ def load_laps(min_year = None):
                     df["_lap_file"] = str(fp)
                     frames.append(df)
                 except Exception as e:
-                    print(f"fail: {e}")
+                    print(f"fail reading {fp}: {e}")
 
     if HISTORICAL_PROCESSED_DIR.exists():
         for track_dir in sorted([p for p in HISTORICAL_PROCESSED_DIR.iterdir() if p.is_dir()]):
-            csvs = sorted(track_dir.rglob("*.csv"))
-            for fp in csvs:
+            for fp in sorted(track_dir.rglob("*.csv")):
                 try:
                     df = pd.read_csv(fp)
                     df["track"] = track_dir.name
-                    # first 4 digits of the file name:
                     year = int("".join(ch for ch in fp.stem[:4] if ch.isdigit()))
                     df["year"] = year
                     df["_lap_file"] = str(fp)
@@ -36,108 +62,143 @@ def load_laps(min_year = None):
                         continue
                     frames.append(df)
                 except Exception as e:
-                    print(f"fail: {e}")
+                    print(f"fail reading {fp}: {e}")
 
-    all_laps = pd.concat(frames, ignore_index=True)
-    return all_laps
+    if not frames:
+        return pd.DataFrame()
 
-def load_corner_json(json_path: Path) -> pd.DataFrame:
-    if not CORNER_JSON_DIR.exists():
-        return pd.DataFrame(columns=["track", "id", "type", "apex_m"])
+    return pd.concat(frames, ignore_index=True)
 
-    if json_path is not None:
-        files = [Path(json_path)]
-    else:
-        files = sorted(p for p in CORNER_JSON_DIR.rglob("*.json") if p.is_file())
-        files = [p for p in files if p.name.lower() not in {"corner_info.json"}]
+def load_corner_yaml(track, year=None):
+    with CORNER_STATS_DIR.open("r", encoding="utf-8") as f:
+        stats = yaml.safe_load(f) or {}
+
+    track_key = _resolve_track_key(track)
+    track_block = stats.get(track_key, None)
+    if not isinstance(track_block, dict):
+        return (
+            pd.DataFrame(columns=["track", "id", "type", "apex_m", "group_label", "region_start_m", "region_end_m"]),
+            int(year),
+        )
+    year_to_groups: dict[int, list[dict]] = {}
+    for k, v in track_block.items():
+        try:
+            ky = int(k)
+        except Exception:
+            continue
+        if isinstance(v, list) and len(v) > 0:
+            year_to_groups[ky] = v
+
+    if not year_to_groups:
+        return (
+            pd.DataFrame(columns=["track", "id", "type", "apex_m", "group_label", "region_start_m", "region_end_m"]),
+            int(year),
+        )
+
+    resolved_year = _get_track_layout(list(year_to_groups.keys()), int(year))
+    groups = year_to_groups[resolved_year]
 
     rows: list[dict] = []
-    for fp in files:
-        try:
-            with fp.open("r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception as e:
-            print(f"fail reading {fp}: {e}")
+    for g in groups:
+        turns = g.get("turns", []) or []
+        apex_dist = g.get("apex_dist", []) or []
+        region = g.get("region_size", None)
+
+        if not (isinstance(region, (list, tuple)) and len(region) == 2):
             continue
 
-        track_name = data.get("track", {}).get("name") if isinstance(data.get("track"), dict) else None
-        track_name = track_name or fp.stem  # fallback
+        region_start_m = float(region[0])
+        region_end_m = float(region[1])
+        group_label = "-".join(str(t) for t in turns) if turns else None
 
-        for c in data.get("corners", []):
-            distances = c.get("distances_m", {}) or {}
-            apex = distances.get("apex", None)
-            if apex is None:
+        for i, turn in enumerate(turns):
+            apex_m = apex_dist[i] if i < len(apex_dist) else None
+            if apex_m is None:
                 continue
-
             rows.append(
                 {
-                    "track": track_name,
-                    "id": c.get("id"),
-                    "type": c.get("type"),
-                    "apex_m": float(apex),
+                    "track": track,
+                    "id": int(turn),
+                    "type": "turn",
+                    "apex_m": float(apex_m),
+                    "group_label": group_label,
+                    "region_start_m": region_start_m,
+                    "region_end_m": region_end_m,
                 }
             )
 
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df = df.sort_values("apex_m").reset_index(drop=True)
+
+    return df, resolved_year
+
+def segment_and_write_laps(track, laps, regions, resolved_year):
+    out_root = CORNER_INFO_DIR / track / str(resolved_year)
+    out_root.mkdir(parents=True, exist_ok=True)
+
+    regions_use = (
+        regions[["group_label", "region_start_m", "region_end_m"]]
+        .dropna(subset=["group_label", "region_start_m", "region_end_m"])
+        .drop_duplicates()
+        .sort_values(["region_start_m", "region_end_m"])
+        .reset_index(drop=True)
+    )
+
+    laps = laps.copy()
+    laps["distance"] = pd.to_numeric(laps["distance"], errors="coerce")
+    laps = laps.dropna(subset=["distance", "_lap_file"]).copy()
+
+    # column output format/order:
+    desired_cols = [
+        "time", "distance", "x", "y", "z", "speed", "throttle", "brake",
+        "rpm", "gear", "drs", "source",
+    ]
+
+    wrote = 0
+    for lap_file, g in laps.groupby("_lap_file", sort=False):
+        g = g.sort_values("distance").reset_index(drop=True)
+        lap_stem = Path(lap_file).stem
+
+        for _, r in regions_use.iterrows():
+            label = str(r["group_label"])
+            start_m = float(r["region_start_m"])
+            end_m = float(r["region_end_m"])
+
+            seg = g[(g["distance"] >= start_m) & (g["distance"] <= end_m)].copy()
+            # remove columns only used for segmentation:
+            seg = seg.drop(columns=["track", "year", "_lap_file"], errors="ignore")
+            seg = seg[desired_cols]
+
+            out_fp = out_root / f"{lap_stem}_T{label}.csv"
+            if out_fp.exists():
+                continue
+            seg.to_csv(out_fp, index=False)
+            wrote += 1
+
+    print(f"Wrote {wrote:,} segment CSV(s) under: {out_root}")
+    return out_root
 
 if __name__ == "__main__":
     track = "Australian_Grand_Prix"
+
     all_laps = load_laps(min_year=2021)
-    australia_laps = all_laps[all_laps["track"] == track]
+    if all_laps.empty:
+        raise SystemExit("No lap CSVs found.")
 
-    print(f"Loaded rows: {len(australia_laps):,}")
-    if australia_laps.empty:
-        raise SystemExit("No lap CSVs found for the requested range.")
+    track_laps = all_laps[all_laps["track"] == track].copy()
+    print(f"Loaded rows: {len(track_laps):,}")
+    if track_laps.empty:
+        raise SystemExit(f"No lap CSVs found for track={track!r}.")
 
-    australia_fp = CORNER_JSON_DIR / "australia_2021.json"
-    corners = load_corner_json(australia_fp)
-    print(f"Loaded corners: {len(corners):,} from {australia_fp.name}\n")
-    print(f"Corners:\n{corners}")
+    years = pd.to_numeric(track_laps["year"], errors="coerce").dropna().astype(int)
+    requested_year = int(years.mode().iloc[0]) if not years.empty else 2025
 
-    distance_col = "distance"
-    corners_use = corners.drop(columns=["track"], errors="ignore").copy()
-    corners_use["apex_m"] = pd.to_numeric(corners_use["apex_m"], errors="coerce")
-    corners_use = corners_use.dropna(subset=["apex_m"]).sort_values("apex_m").reset_index(drop=True)
+    corners, year = load_corner_yaml(track=track, year=requested_year)
+    print(f"Loaded corners: {len(corners):,} for {track} ({year} layout)")
 
-    laps = australia_laps.copy()
-    laps[distance_col] = pd.to_numeric(laps[distance_col], errors="coerce")
-    laps["speed"] = pd.to_numeric(laps["speed"], errors="coerce")
-    laps = laps.dropna(subset=[distance_col, "_lap_file"]).copy()
-
-    group_cols = ["_lap_file"]
-
-    laps_sorted = (
-        laps.sort_values(by=[distance_col] + group_cols, kind="mergesort")
-            .reset_index(drop=True)
-    )
-    lap_keys = (
-        laps_sorted[group_cols]
-        .drop_duplicates()
-        .sort_values(by=group_cols, kind="mergesort")
-        .reset_index(drop=True)
-    )
-    lap_corners = (
-        lap_keys.merge(corners_use, how="cross")
-        .sort_values(by=["apex_m"] + group_cols, kind="mergesort")
-        .reset_index(drop=True)
-    )
-    apex_samples = pd.merge_asof(
-        lap_corners,
-        laps_sorted,
-        left_on="apex_m",
-        right_on=distance_col,
-        by=group_cols,
-        direction="nearest",
-        suffixes=("_corner", ""),
-    )
-
-    apex_samples["apex_speed"] = apex_samples["speed"]
-
-    cols = ["_lap_file", "id", "type", "apex_m", "matched_distance_m", "distance_error_m", "apex_speed"]
-    cols = [c for c in cols if c in apex_samples.columns]
-
-    pd.set_option("display.max_rows", 200)
-    pd.set_option("display.max_colwidth", 120)
-
-    print("Apex samples (corner speed per file):")
-    print(apex_samples.sort_values(["_lap_file", "apex_m"])[cols].to_string(index=False))
+    if corners.empty:
+        raise Exception(
+            f"No corners in corner_stats.yaml for track={track!r}. "
+        )
+    segment_and_write_laps(track, track_laps, corners, year)
