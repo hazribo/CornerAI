@@ -1,0 +1,93 @@
+australia:
+  2018: []
+  2021:
+    - turns: [1, 2]
+      apex_dist: [338, 416]
+      region_size: [190, 480]
+    - turns: [3, 4]
+      apex_dist: [1065, 1212]
+      region_size: [915, 1270]
+    - turns: [5]
+      apex_dist: [1414]
+      region_size: [1270, 1558]
+    - turns: [6, 7]
+      apex_dist: [1833, 1940]
+      region_size: [1730, 2040]
+    - turns: [8]
+      apex_dist: [2140]
+      region_size: [2040, 2240]
+    - turns: [9, 10]
+      apex_dist: [3260, 3377]
+      region_size: [3150, 3487]
+    - turns: [11]
+      apex_dist: [4060]
+      region_size: [3930, 4190]
+    - turns: [12]
+      apex_dist: [4333]
+      region_size: [4233, 4433]
+    - turns: [13, 14]
+      apex_dist: [4577, 4721]
+      region_size: [4433, 4815]
+
+shanghai: []
+
+suzuka: []
+
+bahrain:
+  usual: []
+  # one-off 2020:
+  outer_circuit: []
+
+jeddah: []
+
+miami: []
+
+imola: []
+
+monaco: []
+
+spain:
+  2018: []
+  # without chicane:
+  2023: []
+
+canada: []
+
+austria:
+  2018: []
+  2025: []
+
+britain: []
+
+spa: []
+
+hungary: []
+
+zandvoort: []
+
+monza: []
+
+baku: []
+
+singapore:
+  2018: []
+  2023: []
+  2025: []
+
+cota: []
+
+mexico: []
+
+brazil: []
+
+vegas: []
+
+qatar:
+  2018: []
+  2023: []
+
+abu_dhabi:
+  2018: []
+  2021: []
+
+# circuits formerly on calendar/one-off to be included below
