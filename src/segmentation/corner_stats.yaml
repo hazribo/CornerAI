@@ -3,28 +3,28 @@ australia:
     - turns: [1, 2]
       apex_dist: [338, 416]
       region_size: [190, 480]
-      label: "double"
+      label: "chicane"
     - turns: [3, 4]
       apex_dist: [1065, 1212]
       region_size: [915, 1270]
-      label: "double"
+      label: "double_ninety"
     - turns: [5]
       apex_dist: [1414]
       region_size: [1270, 1558]
-      label: "high"
+      label: "high_r"
     - turns: [6, 7]
       apex_dist: [1833, 1940]
       region_size: [1730, 2040]
-      label: "double"
+      label: "chicane"
     - turns: [8]
       apex_dist: [2140]
       region_size: [2040, 2240]
-      label: "high"
+      label: "high_r"
     # now 2018 has T9/10 chicane:
-    - turns: [9, 10]
-      apex_dist: []
-      region_size: []
-      label: ""
+    #- turns: [9, 10]
+    #  apex_dist: []
+    #  region_size: []
+    #  label: ""
   2021:
     - turns: [1, 2]
       apex_dist: [338, 416]
@@ -33,35 +33,35 @@ australia:
     - turns: [3, 4]
       apex_dist: [1065, 1212]
       region_size: [915, 1270]
-      label: "double"
+      label: "double_ninety"
     - turns: [5]
       apex_dist: [1414]
       region_size: [1270, 1558]
-      label: "high"
+      label: "high_r"
     - turns: [6, 7]
       apex_dist: [1833, 1940]
       region_size: [1730, 2040]
-      label: "double"
+      label: "chicane"
     - turns: [8]
       apex_dist: [2140]
       region_size: [2040, 2240]
-      label: "high"
+      label: "high_r"
     - turns: [9, 10]
       apex_dist: [3260, 3377]
       region_size: [3150, 3487]
-      label: "double"
+      label: "double_flat"
     - turns: [11]
       apex_dist: [4060]
       region_size: [3930, 4190]
-      label: "low"
+      label: "low_ninety"
     - turns: [12]
       apex_dist: [4333]
       region_size: [4233, 4433]
-      label: "medium"
+      label: "medium_r"
     - turns: [13, 14]
       apex_dist: [4577, 4721]
       region_size: [4433, 4815]
-      label: "double"
+      label: "low_complex"
 
 shanghai:
   - turns: [1, 2, 3, 4]
@@ -71,7 +71,7 @@ shanghai:
   - turns: [5]
     apex_dist: [1312]
     region_size: [1252, 1372]
-    label: "high"
+    label: "high_r"
   - turns: [6]
     apex_dist: [1560]
     region_size: [1380, 1740]
@@ -79,57 +79,61 @@ shanghai:
   - turns: [7]
     apex_dist: [2024]
     region_size: [1904, 2144]
-    label: "high"
+    label: "high_l"
   - turns: [8, 9, 10]
     apex_dist: [2314, 2500, 2616]
     region_size: [2144, 2786]
-    label: "triple"
+    label: "medium_triple"
   - turns: [11, 12, 13] # separate 13?
     apex_dist: [3085, 3165, 3374]
     region_size: [2870, 3474]
-    label: "triple"
-  - turns: [14, 15] # separate 15?
-    apex_dist: [4740, 4815]
-    region_size: [4530, 4900]
+    label: "increasing_radius"
+  - turns: [14] # separate 15?
+    apex_dist: [4740]
+    region_size: [4530, 4785]
     label: "hairpin"
+  - turns: [15] # separate 15?
+    apex_dist: [4815]
+    region_size: [4785, 4850]
+    label: "medium_r"
   - turns: [16]
     apex_dist: [5118]
     region_size: [4900, 5330]
-    label: "high"
+    label: "high_l"
 
 suzuka:
   - turns: [1, 2]
     apex_dist: [719, 830]
     region_size: [580, 960]
-    label: "double" # suzuka t1 - flat out 
-  - turns: [3, 4, 5, 6] # possibly include 7 here
-    apex_dist: [1063, 1197, 1364, 1522]
-    region_size: [960, 1680]
+    label: "double_apex" # suzuka t1 - flat out 
+  - turns: [3, 4, 5, 6, 7]
+    apex_dist: [1063, 1197, 1364, 1522, 1841]
+    region_size: [960, 1941]
     label: "esses"
-  - turns: [7]
-    apex_dist: [1841]
-    region_size: [1741, 1941]
-    label: "high"
   - turns: [8, 9]
     apex_dist: [2265, 2412]
     region_size: [2165, 2600]
-    label: "double"
-  - turns: [10, 11] # separate 10?
-    apex_dist: [2743, 2889]
-    region_size: [2643, 3089]
+    label: "double_r"
+  - turns: [10]
+    apex_dist: [2743]
+    region_size: [2643, 2800]
+    label: "high_r"
+  - turns: [11] 
+    apex_dist: [2889]
+    region_size: [2800, 3089]
     label: "hairpin"
   - turns: [12]
     apex_dist: [3416]
     region_size: [3316, 3516]
-    label: "high"
+    label: "high_r"
   - turns: [13, 14]
     apex_dist: [3785, 3947]
     region_size: [3645, 4147]
-    label: "double apex"
+    label: "double_apex"
   - turns: [15] # 130R
     apex_dist: [5000]
     region_size: [4900, 5100]
-    label: "high" 
+    label: "high_l" 
   - turns: [16, 17]
     apex_dist: [5379, 5461]
     region_size: [5200, 5580]
@@ -137,21 +141,25 @@ suzuka:
   - turns: [18]
     apex_dist: [5628]
     region_size: [5560, 5716]
-    label: "high"
+    label: "high_r"
 
 bahrain:
-  - turns: [1, 2]
-    apex_dist: [706, 808]
-    region_size: [540, 868]
-    label: "double"
+  - turns: [1]
+    apex_dist: [706]
+    region_size: [540, 780]
+    label: "low_r"
+  - turns: [2]
+    apex_dist: [808]
+    region_size: [750, 840]
+    label: "medium_l"
   - turns: [3]
     apex_dist: [925]
     region_size: [860, 990]
-    label: "high"
+    label: "high_r"
   - turns: [4]
     apex_dist: [1504]
     region_size: [1304, 1704]
-    label: "low"
+    label: "low_r"
   - turns: [5, 6, 7]
     apex_dist: [1778, 1858, 1966]
     region_size: [1660, 2066]
@@ -159,7 +167,7 @@ bahrain:
   - turns: [8]
     apex_dist: [2211]
     region_size: [2061, 2361]
-    label: "low"
+    label: "hairpin"
   - turns: [9, 10]
     apex_dist: [2562, 2672]
     region_size: [2462, 2822]
@@ -167,33 +175,33 @@ bahrain:
   - turns: [11]
     apex_dist: [3449]
     region_size: [3240, 3580]
-    label: "medium"
+    label: "medium_l"
   - turns: [12, 13]
     apex_dist: [3856, 4066]
     region_size: [3756, 4220]
-    label: "double" # high -> medium
+    label: "medium_double" # high -> medium
   - turns: [14, 15]
     apex_dist: [4872, 4953]
     region_size: [4700, 5053]
-    label: "double"
+    label: "high_double"
 
 jeddah:
   - turns: [1, 2, 3]
     apex_dist: [482, 536, 681]
     region_size: [320, 840]
-    label: "triple"
+    label: "chicane"
   - turns: [4, 5, 6]
     apex_dist: [973, 1086, 1240]
     region_size: [860, 1300]
-    label: "double"
-  - turns: [7, 8, 9, 10] 
-    apex_dist: [1356, 1442, 1594, 1699]
-    region_size: [1340, 1750]
-    label: "quadruple" 
-  - turns: [11, 12]
-    apex_dist: [1801, 1867]
-    region_size: [1750, 1967]
-    label: "high double" # these two are barely corners
+    label: "high_triple"
+  - turns: [7, 8, 9] 
+    apex_dist: [1356, 1442, 1594]
+    region_size: [1340, 1650]
+    label: "high_chicane" 
+  - turns: [10, 11, 12]
+    apex_dist: [1699, 1801, 1867]
+    region_size: [1650, 1967]
+    label: "high_triple"
   - turns: [13]
     apex_dist: [2413]
     region_size: [2160, 2560]
@@ -201,49 +209,53 @@ jeddah:
   - turns: [14]
     apex_dist: [2733]
     region_size: [2633, 2833]
-    label: "high"
+    label: "high_r"
   - turns: [15, 16, 17]
     apex_dist: [2943, 3067, 3166]
     region_size: [2880, 3280]
-    label: "triple"
+    label: "high_triple"
   - turns: [18]
     apex_dist: [3401]
     region_size: [3301, 3501]
-    label: "high"
+    label: "high_l"
   - turns: [19]
     apex_dist: [3594]
     region_size: [3494, 3694]
-    label: "high"
+    label: "high_r"
   - turns: [20]
     apex_dist: [3806]
     region_size: [3706, 3906]
-    label: "high"
+    label: "high_l"
   - turns: [21] # right before 22 - could combine
     apex_dist: [4009]
     region_size: [3959, 4059]
-    label: "high"
+    label: "high_r"
   - turns: [22, 23, 24]
     apex_dist: [4244, 4316, 4472]
     region_size: [4060, 4572]
-    label: "triple" # high -> high -> high
+    label: "high_triple" # high -> high -> high
   - turns: [25]
     apex_dist: [4761]
     region_size: [4661, 4861]
-    label: "high"
+    label: "high_l"
   - turns: [26]
     apex_dist: [5137]
     region_size: [5037, 5237]
-    label: "high"
+    label: "high_l"
   - turns: [27]
     apex_dist: [5510]
     region_size: [5300, 5750]
     label: "hairpin"
 
 miami:
-  - turns: [1, 2, 3]
-    apex_dist: [361, 458, 546]
-    region_size: [220, 646]
-    label: "triple"
+  - turns: [1]
+    apex_dist: [361]
+    region_size: [220, 420]
+    label: "low_r"
+  - turns: [2, 3]
+    apex_dist: [458, 546]
+    region_size: [420, 646]
+    label: "high_double"
   - turns: [4, 5, 6, 7, 8]
     apex_dist: [1115, 1248, 1386]
     region_size: [1000, 1440]
@@ -255,15 +267,15 @@ miami:
   - turns: [9]
     apex_dist: [2171]
     region_size: [2071, 2271]
-    label: "high"
+    label: "high_r"
   - turns: [10]
     apex_dist: [2442]
     region_size: [2342, 2542]
-    label: "high"
+    label: "high_l"
   - turns: [11, 12]
     apex_dist: [3068, 3180]
     region_size: [2940, 3300]
-    label: "double"
+    label: "low_double"
   - turns: [13, 14, 15]
     apex_dist: [3323, 3391, 3413]
     region_size: [3300, 3460]
