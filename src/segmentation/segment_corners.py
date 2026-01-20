@@ -66,9 +66,12 @@ def _get_track_layout(available_years, requested_year):
 def load_laps(min_year=None):
     frames: list[pd.DataFrame] = []
 
+    """
+    # Disable for now - no f125 corner stats to use.
+    
     if F125_PROCESSED_DIR.exists():
-        for track_dir in sorted([p for p in F125_PROCESSED_DIR.iterdir() if p.is_dir()]):
-            for fp in sorted(track_dir.rglob("*.csv")):
+        for track_dir in [p for p in F125_PROCESSED_DIR.iterdir() if p.is_dir()]:
+            for fp in track_dir.rglob("*.csv"):
                 try:
                     df = pd.read_csv(fp)
                     df["track"] = track_dir.name
@@ -77,18 +80,20 @@ def load_laps(min_year=None):
                     frames.append(df)
                 except Exception as e:
                     print(f"fail reading {fp}: {e}")
+    """
 
     if HISTORICAL_PROCESSED_DIR.exists():
-        for track_dir in sorted([p for p in HISTORICAL_PROCESSED_DIR.iterdir() if p.is_dir()]):
-            for fp in sorted(track_dir.rglob("*.csv")):
+        for track_dir in [p for p in HISTORICAL_PROCESSED_DIR.iterdir() if p.is_dir()]:
+            for fp in track_dir.rglob("*.csv"):
                 try:
+                    # check year from filename; ensure correct year in case of min_year filter:
+                    year = int("".join(ch for ch in fp.stem[:4] if ch.isdigit()))
+                    if min_year is not None and year < min_year:
+                        continue # skip if before min_year
                     df = pd.read_csv(fp)
                     df["track"] = track_dir.name
-                    year = int("".join(ch for ch in fp.stem[:4] if ch.isdigit()))
                     df["year"] = year
                     df["_lap_file"] = str(fp)
-                    if min_year is not None and year < min_year:
-                        continue
                     frames.append(df)
                 except Exception as e:
                     print(f"fail reading {fp}: {e}")
