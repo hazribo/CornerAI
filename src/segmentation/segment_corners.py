@@ -252,6 +252,11 @@ if __name__ == "__main__":
         raise Exception("No lap CSVs found.")
 
     for track in tracks:
+        regions, _ = load_corner_yaml(track=track, year=2025) # 2025 will try any available layout - if none, no data.
+        if regions.empty:
+            print(f"No corner regions in corner_stats.yaml for {track}. Skipping...")
+            continue
+
         track_laps = all_laps[(all_laps["track"]).map(_norm_track_name) == track].copy()
         if track_laps.empty:
             print(f"No lap CSVs found for {track}.")
@@ -261,11 +266,9 @@ if __name__ == "__main__":
 
         years = pd.to_numeric(track_laps["year"], errors="coerce").dropna().astype(int)
         for requested_year in sorted(years.unique()):
-            year_laps = track_laps[track_laps["year"] == requested_year].copy()
+            # get data again - may need to get different layouts for same circuit:
             regions, layout_year = load_corner_yaml(track=track, year=requested_year)
             print(f"Loaded regions: {len(regions):,} for {track} ({layout_year} layout)")
-            if regions.empty:
-                print(f"No labeled regions with region_size in corner_stats.yaml for {track} {layout_year}.")
-                continue
+            year_laps = track_laps[track_laps["year"] == requested_year].copy()
 
             segment_and_write_laps(track, requested_year, year_laps, regions, layout_year)
