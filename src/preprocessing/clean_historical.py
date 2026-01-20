@@ -15,7 +15,10 @@ def clean(filepath):
     df["x"] = df_raw["X"] / 10
     df["y"] = df_raw["Z"] / 10 # swap y and z
     df["z"] = df_raw["Y"] / 10
-    df["speed"] = df_raw["Speed"] # km/h
+    # Normalise speed to 0-1:
+    speed = pd.to_numeric(df_raw["Speed"], errors="coerce")
+    max_speed = speed.max(skipna=True)
+    df["speed"] = speed / max_speed
     # Normalise throttle, brake to 0-1:
     df["throttle"] = df_raw["Throttle"].apply(lambda x: 1.0 if x > 95 else 0.0)
     df["brake"] = df_raw["Brake"].apply(lambda x: 1.0 if x == True or x == "True" else 0.0)

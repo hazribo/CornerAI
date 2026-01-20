@@ -14,7 +14,10 @@ def clean(filepath):
     df["x"] = df_raw["x [m]"]
     df["y"] = df_raw["z [m]"] # swap y and z
     df["z"] = df_raw["y [m]"]
-    df["speed"] = df_raw["speed [m/s]"] # it says m/s but it's in km/h? weird telemetry tool issue
+    # Normalise speed to 0-1:
+    speed = pd.to_numeric(df_raw["speed [m/s]"], errors="coerce")
+    max_speed = speed.max(skipna=True)
+    df["speed"] = speed / max_speed
     # Normalise throttle, brake, steering to 0-1:
     df["throttle"] = df_raw["throttle [%]"].astype(float) / 100.0
     df["brake"] = df_raw["brake [%]"].astype(float) / 100.0
