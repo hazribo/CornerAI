@@ -22,7 +22,8 @@ TRACK_ALIASES = {
 }
 
 # feature columns and label details for RF model:
-FEATURE_COLS = ["time", "distance", "x", "y", "z", "speed", "throttle", "brake", "rpm", "gear", "drs"]
+FEATURE_COLS = ["time", "distance", "x", "y", "z", "speed", "throttle", "brake", "rpm", "gear", "drs",
+                "curvature"]
 LABELS = {
     "brake_threshold": 0.1,
     "brake_lift_min": 0.05,
@@ -45,6 +46,9 @@ def load_historical_laps():
                     df["track"] = TRACK_ALIASES.get(track_dir.name, track_dir.name)
                     df["year"] = year
                     df["lap_id"] = fp.stem
+                    # get laptime from file name, i.e. after the second underscore:
+                    parts = fp.stem.split("_")
+                    df["laptime"] = pd.to_numeric(parts[2], errors="coerce")
                     frames.append(df)
                 except Exception as e:
                     print(f"fail reading {fp}: {e}")
@@ -113,6 +117,149 @@ def add_labels(df: pd.DataFrame):
 
     return out
 
+def curvature(distance_m, x, y):
+    s = np.asarray(distance_m)
+    x = np.asarray(x)
+    y = np.asarray(y)
+
+    # protect from div by zero warnings:
+    ds = np.diff(s)
+    if len(ds) and np.any(ds <= 0):
+        s = s + 1e-6 * np.arange(len(s))
+
+    dx_ds = np.gradient(x, s)
+    dy_ds = np.gradient(y, s)
+
+    theta = np.unwrap(np.arctan2(dy_ds, dx_ds))
+    kappa = np.gradient(theta, s)
+
+    return np.nan_to_num(kappa, nan=0.0, posinf=0.0, neginf=0.0)
+
+def add_curvature_features(df):
+    out = df.sort_values(["track", "year", "lap_id", "distance"]).copy()
+    if "curvature" not in out.columns:
+        out["curvature"] = 0.0
+
+    grouped_data = out.groupby(["track", "year", "lap_id"], sort=False)
+    for (_, _, _), lap_df in grouped_data:
+        idx = lap_df.index.to_numpy()
+
+        distance = lap_df["distance"].to_numpy(dtype=float)
+        x = lap_df["x"].to_numpy(dtype=float)
+        y = lap_df["y"].to_numpy(dtype=float)
+
+        kappa = curvature(distance, x, y)
+        out.loc[idx, "curvature"] = np.abs(kappa)
+
+    return out
+
+def extract_events(lap, prob_col):
+    # Gets a list of distances where "events" happen.
+    # i.e.: upwards threshold crossing of prob_col (spaced by min separation)
+    threshold = float(0.6)
+    min_sep = float(40.0)
+
+    df = lap.sort_values("distance")
+    distance = df["distance"].to_numpy()
+    prob = df[prob_col].to_numpy()
+
+    idx = np.where((prob[1:] >= threshold) & (prob[:-1] < threshold))[0] + 1
+
+    events: list[float] = []
+    in_event = False
+
+    for i in range(len(prob)):
+        p = float(prob[i])
+
+        if not in_event:
+            prev_p = float(prob[i - 1]) if i > 0 else 0.0
+            if p >= threshold and prev_p <= (1 - threshold):
+                events.append(float(distance[i]))
+                in_event = True
+        else:
+            if p <= (1 - threshold):
+                in_event = False
+    
+    return events
+
+def nearest_event(lap: float, refs: list[float]):
+    tolerance = float(80.0)
+    if not refs:
+        return None
+    array = np.asarray(refs)
+    i = int(np.argmin(np.abs(array - float(lap))))
+    best = float(array[i])
+    return best if abs(best - float(lap)) <= tolerance else None
+
+def build_references(scored_laps: pd.DataFrame, track: str, mode: str):
+    top_percent = float(0.2)
+
+    if mode not in ["brake", "throttle"]:
+        raise ValueError(f"{mode} not 'brake' or 'throttle'.")
+
+    # get probability for correct attribute (brake or throttle)
+    prob_col = "p_brake_zone" if mode == "brake" else "p_throttle_zone"
+
+    df = scored_laps.loc[scored_laps["track"].astype(str) == str(track)].copy()
+    lap_times = (df.groupby("lap_id")["laptime"].first().sort_values())
+
+    n_keep = max(1, int(round(len(lap_times) * float(top_percent))))
+    keep_ids = set(lap_times.index[:n_keep])
+
+    # get event lists (one per lap):
+    event_list: list[list[float]] = []
+    df_filter = df.loc[df["lap_id"].isin(keep_ids)]
+    for _, lap_df in df_filter.groupby("lap_id"):
+        event_list.append(extract_events(lap_df, prob_col))
+    
+    # get median by event index:
+    # (this is to stop "pedantic" improvements like "brake 1 metre earlier")
+    max_len = max((len(ev) for ev in event_list), default=0)
+    true_events: list[float] = []
+
+    for i in range(max_len):
+        values = [event[i] for event in event_list if len(event) > i]
+        if values:
+            true_events.append(float(np.median(values)))
+
+    return true_events
+
+def advice(lap: pd.DataFrame, ref_brake: list[float], ref_throttle: list[float]):
+    df = lap.sort_values("distance")
+    brake = extract_events(df, "p_brake_zone")
+    throttle = extract_events(df, "p_throttle_zone")
+    rows: list[dict] = []
+
+    def add(mode: str, events: list[float], refs: list[float]):
+        remaining = list(events)
+
+        for i, ref_d in enumerate(refs):
+            lap_d = nearest_event(ref_d, remaining)
+            if lap_d is None:
+                continue
+            remaining.remove(lap_d)
+
+            delta = float(lap_d - ref_d)
+            # "placeholder" advice for now:
+            if mode == "brake":
+                advice = f"Brake {delta:.1f}m earlier" if delta > 0 else f"Brake {delta*-1:.1f}m later"
+            else:
+                advice = f"Throttle {delta:.1f}m earlier" if delta > 0 else f"Throttle {delta*-1:.1f}m later"
+
+            rows.append(
+                {
+                    "mode": mode,
+                    "corner_index": i,
+                    "lap_distance": lap_d,
+                    "ref_distance": ref_d,
+                    "delta": delta,
+                    "advice": advice
+                }
+            )
+    add("brake", brake, ref_brake)
+    add("throttle", throttle, ref_throttle)
+    return pd.DataFrame(rows).sort_values(["mode", "corner_index"]).reset_index()
+
 class RandomForestModel:
     def __init__(self):
         self.models_by_track: dict[str, dict[str, RandomForestClassifier]] = {}
@@ -154,7 +301,7 @@ class RandomForestModel:
     
     @staticmethod
     def train_models(laps: pd.DataFrame):
-        training_df = laps.copy()
+        training_df = add_curvature_features(laps.copy())
         bundle = RandomForestModel()
         bundle.feature_cols = list(FEATURE_COLS)
 
@@ -188,7 +335,7 @@ class RandomForestModel:
         return bundle
     
     def predict_probability(self, laps: pd.DataFrame):
-        scored = laps.copy()
+        scored = add_curvature_features(laps.copy())
         scored["p_brake_zone"] = np.nan
         scored["p_throttle_zone"] = np.nan
 
@@ -218,10 +365,6 @@ class PlotTrackMaps:
         out_dir.mkdir(parents=True, exist_ok=True)
         outputs: list[Path] = []
 
-        required = {"track", "lap_id", "distance", "x", "z", zone_col}
-        missing = required - set(laps.columns)
-        if missing:
-            raise ValueError(f"Missing required columns for plotting: {sorted(missing)}")
 
         df = laps.copy()
 
@@ -235,7 +378,7 @@ class PlotTrackMaps:
             fig.add_trace(
                 go.Scattergl(
                     x=base_lap["x"].to_numpy(dtype=float),
-                    y=base_lap["z"].to_numpy(dtype=float),
+                    y=base_lap["y"].to_numpy(dtype=float),
                     mode="lines",
                     name=f"Track map (lap_id={first_lap_id})",
                     line=dict(color="rgba(0,0,0,0.6)", width=2),
@@ -243,7 +386,6 @@ class PlotTrackMaps:
                 )
             )
 
-            # --- Braking zone points (raw x/z) ---
             if zone_col.startswith("p_"):
                 zone_rows = track_df.loc[track_df[zone_col].astype(float) >= float(prob_threshold)].copy()
             else:
@@ -259,15 +401,17 @@ class PlotTrackMaps:
                 fig.add_trace(
                     go.Scattergl(
                         x=zone_rows["x"].to_numpy(dtype=float),
-                        y=zone_rows["z"].to_numpy(dtype=float),
+                        y=zone_rows["y"].to_numpy(dtype=float),
                         mode="markers",
                         name=f"Braking zones ({zone_col})",
                         marker=dict(size=6, color="rgba(220,20,60,0.95)"),
                         customdata=np.c_[
                             zone_rows["distance"].to_numpy(dtype=float),
                             zone_rows[zone_col].to_numpy(dtype=float),
+                            zone_rows["curvature"].to_numpy(),
                         ],
-                        hovertemplate="BRAKE<br>dist=%{customdata[0]:.1f}m<br>p=%{customdata[1]:.3f}<extra></extra>",
+                        hovertemplate="BRAKE<br>dist=%{customdata[0]:.1f}m<br>p=%{customdata[1]:.3f}"
+                        "<br>curvature=%{customdata[2]:.3f}<extra></extra>",
                     )
                 )
 
@@ -275,7 +419,7 @@ class PlotTrackMaps:
                 title=f"{track_name} — braking zones ({zone_col}{'' if not zone_col.startswith('p_') else f' >= {prob_threshold}'})",
                 template="plotly_white",
                 xaxis_title="x",
-                yaxis_title="z",
+                yaxis_title="y",
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
             )
             fig.update_yaxes(scaleanchor="x", scaleratio=1)
@@ -287,8 +431,8 @@ class PlotTrackMaps:
         return outputs
 
 if __name__ == "__main__":
-    f1_laps = load_historical_laps()
-    labelled_laps = add_labels(f1_laps)
+    laps = load_historical_laps()
+    #laps = add_labels(laps)
     # debug:
     # print(f"size of f1_laps: {len(f1_laps)}")
     #model = RandomForestModel.train_models(labelled_laps)
@@ -297,11 +441,30 @@ if __name__ == "__main__":
 
     model = RandomForestModel.load_model("Z:/CornerAI/data/models/lap_model.joblib")
 
-    scored = model.predict_probability(labelled_laps)
-    plot_paths = PlotTrackMaps.plot_braking_zones_by_track(
-        scored,
-        out_dir=MODEL_OUTPUT_DIR,
-        prob_threshold=0.5,
-        zone_col="p_brake_zone",
-    )
-    print(f"saved {len(plot_paths)} plots to {MODEL_OUTPUT_DIR}")
+    scored = model.predict_probability(laps)
+
+    # debug testing: advice for one zandvoort lap:
+    track = "Dutch_Grand_Prix"
+    track_df = scored.loc[scored["track"].astype(str) == track].copy()
+    if track_df.empty:
+        raise ValueError(f"No laps found for track='{track}'")
+
+    ref_brake = build_references(track_df, track=track, mode="brake")
+    ref_throttle = build_references(track_df, track=track, mode="throttle")
+
+    slowest_lap = (track_df.groupby("lap_id")["laptime"].first().sort_values().index[-1])
+    lap = track_df.loc[track_df["lap_id"].astype(str) == slowest_lap].copy()
+    advice_df = advice(lap, ref_brake, ref_throttle)
+    print(advice_df)
+
+    advice_out = MODEL_OUTPUT_DIR / f"{track}_advice_{slowest_lap}.csv"
+    advice_df.to_csv(advice_out, index=False)
+    print(f"saved advice to {advice_out}")
+
+    #plot_paths = PlotTrackMaps.plot_braking_zones_by_track(
+    #    scored,
+    #    out_dir=MODEL_OUTPUT_DIR,
+    #    prob_threshold=0.5,
+    #    zone_col="p_brake_zone",
+    #)
+    #print(f"saved {len(plot_paths)} plots to {MODEL_OUTPUT_DIR}")
