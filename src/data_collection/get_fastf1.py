@@ -3,10 +3,11 @@ import os
 import warnings
 import logging
 import shutil
+from pathlib import Path
 
 logging.getLogger("fastf1").setLevel(logging.CRITICAL)
 warnings.filterwarnings("ignore", category=FutureWarning)
-cache_dir = "../data/raw/historical/"
+cache_dir = Path(__file__).resolve().parents[2] / "data" / "raw" / "historical"
 os.makedirs(cache_dir, exist_ok=True)
 ff1.Cache.enable_cache(cache_dir)
 
