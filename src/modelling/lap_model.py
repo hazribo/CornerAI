@@ -23,7 +23,7 @@ TRACK_ALIASES = {
 
 # feature columns and label details for RF model:
 FEATURE_COLS = ["time", "distance", "x", "y", "z", "speed", "throttle", "brake", "rpm", "gear", "drs",
-                "curvature"]
+                "c", "cb1", "ca1"] # curvature, curvature before 100m, curvature after 100m
 LABELS = {
     "brake_threshold": 0.1,
     "brake_lift_min": 0.05,
@@ -80,9 +80,9 @@ def add_labels(df: pd.DataFrame):
     for (_, _, _), lap_df in grouped_data:
         idx = lap_df.index.to_numpy()
 
-        distance = lap_df["distance"].to_numpy(dtype=float)
-        brake = lap_df["brake"].to_numpy(dtype=float)
-        throttle = lap_df["throttle"].to_numpy(dtype=float)
+        distance = lap_df["distance"].to_numpy()
+        brake = lap_df["brake"].to_numpy()
+        throttle = lap_df["throttle"].to_numpy()
 
         # calc both brake and throttle deltas:
         brake_delta = np.diff(brake, prepend=brake[0])
@@ -117,28 +117,67 @@ def add_labels(df: pd.DataFrame):
 
     return out
 
-def curvature(distance_m, x, y):
-    s = np.asarray(distance_m)
-    x = np.asarray(x)
-    y = np.asarray(y)
+########################
+# Curvature Functions  #
+########################
 
-    # protect from div by zero warnings:
-    ds = np.diff(s)
-    if len(ds) and np.any(ds <= 0):
-        s = s + 1e-6 * np.arange(len(s))
+def get_curvature(x, y):
+    x = np.asarray(x, )
+    y = np.asarray(y, )
 
-    dx_ds = np.gradient(x, s)
-    dy_ds = np.gradient(y, s)
+    n = len(x)
+    kappa = np.zeros(n, )
+    if n < 3:
+        return kappa
 
-    theta = np.unwrap(np.arctan2(dy_ds, dx_ds))
-    kappa = np.gradient(theta, s)
+    for i in range(1, n - 1):
+        A = (x[i - 1], y[i - 1])
+        B = (x[i], y[i])
+        C = (x[i + 1], y[i + 1])
+        k = calc_curvature(A, B, C)
+        kappa[i] = 0.0 if not np.isfinite(k) else k
 
-    return np.nan_to_num(kappa, nan=0.0, posinf=0.0, neginf=0.0)
+    kappa[0] = kappa[1]
+    kappa[-1] = kappa[-2]
+    return kappa
+
+def calc_curvature(A, B, C):
+    v1 = np.array(B) - np.array(A)
+    v2 = np.array(C) - np.array(B)
+    
+    angle1 = np.arctan2(v1[1], v1[0])
+    angle2 = np.arctan2(v2[1], v2[0])
+    
+    d_theta = (angle2 - angle1 + np.pi) % (2 * np.pi) - np.pi
+    ds = (np.linalg.norm(v1) + np.linalg.norm(v2)) / 2
+    
+    return d_theta / ds 
+
+def curvature_context(distance_m, kappa, window_m=100.0):
+    d = np.asarray(distance_m, dtype=float)
+    k = np.abs(np.asarray(kappa, dtype=float))
+
+    n = len(d)
+    c = k.copy()
+    cb1 = np.zeros(n, dtype=float)
+    ca1 = np.zeros(n, dtype=float)
+
+    for i in range(n):
+        left = np.searchsorted(d, d[i] - window_m, side="left")
+        right = np.searchsorted(d, d[i] + window_m, side="right")
+
+        if i > left:
+            cb1[i] = k[left:i].mean()
+        if right > i + 1:
+            ca1[i] = k[i + 1:right].mean()
+
+    return c, cb1, ca1
 
 def add_curvature_features(df):
     out = df.sort_values(["track", "year", "lap_id", "distance"]).copy()
-    if "curvature" not in out.columns:
-        out["curvature"] = 0.0
+    for col in ["c", "cb1", "ca1"]:
+        if col not in out.columns:
+            out[col] = 0.0
 
     grouped_data = out.groupby(["track", "year", "lap_id"], sort=False)
     for (_, _, _), lap_df in grouped_data:
@@ -148,8 +187,12 @@ def add_curvature_features(df):
         x = lap_df["x"].to_numpy(dtype=float)
         y = lap_df["y"].to_numpy(dtype=float)
 
-        kappa = curvature(distance, x, y)
-        out.loc[idx, "curvature"] = np.abs(kappa)
+        kappa = get_curvature(x, y)
+        c, cb1, ca1 = curvature_context(distance, kappa, window_m=100.0)
+
+        out.loc[idx, "c"] = c
+        out.loc[idx, "cb1"] = cb1
+        out.loc[idx, "ca1"] = ca1
 
     return out
 
@@ -377,11 +420,30 @@ class PlotTrackMaps:
             fig = go.Figure()
             fig.add_trace(
                 go.Scattergl(
-                    x=base_lap["x"].to_numpy(dtype=float),
-                    y=base_lap["y"].to_numpy(dtype=float),
+                    x=base_lap["x"].to_numpy(),
+                    y=base_lap["y"].to_numpy(),
                     mode="lines",
                     name=f"Track map (lap_id={first_lap_id})",
                     line=dict(color="rgba(0,0,0,0.6)", width=2),
+                    hoverinfo="skip",
+                )
+            )
+            
+            # Add current curvature colour to track map:
+            curv = base_lap["c"].to_numpy()
+            fig.add_trace(
+                go.Scattergl(
+                    x=base_lap["x"].to_numpy(),
+                    y=base_lap["y"].to_numpy(),
+                    mode="markers",
+                    name="Curvature",
+                    marker=dict(
+                        size=4,
+                        color=curv,
+                        colorscale="Turbo",
+                        showscale=True,
+                        colorbar=dict(title="curvature"),
+                    ),
                     hoverinfo="skip",
                 )
             )
@@ -400,14 +462,14 @@ class PlotTrackMaps:
 
                 fig.add_trace(
                     go.Scattergl(
-                        x=zone_rows["x"].to_numpy(dtype=float),
-                        y=zone_rows["y"].to_numpy(dtype=float),
+                        x=zone_rows["x"].to_numpy(),
+                        y=zone_rows["y"].to_numpy(),
                         mode="markers",
                         name=f"Braking zones ({zone_col})",
                         marker=dict(size=6, color="rgba(220,20,60,0.95)"),
                         customdata=np.c_[
-                            zone_rows["distance"].to_numpy(dtype=float),
-                            zone_rows[zone_col].to_numpy(dtype=float),
+                            zone_rows["distance"].to_numpy(),
+                            zone_rows[zone_col].to_numpy(),
                             zone_rows["curvature"].to_numpy(),
                         ],
                         hovertemplate="BRAKE<br>dist=%{customdata[0]:.1f}m<br>p=%{customdata[1]:.3f}"
