@@ -1,7 +1,6 @@
 @echo off
 SETLOCAL ENABLEDELAYEDEXPANSION
 
-call .\venv\Scripts\activate.bat
 REM Set the raw fastf1 path to target:
 if not exist "..\data\raw\historical\2025" mkdir ..\data\raw\historical\2025
 SET target_dir= "..\data\raw\historical\2025"
@@ -23,7 +22,7 @@ IF !folder_count! GEQ 24 (
 
 REM Run get_fastf1.py until timeout:
 echo Running get_fastf1.py...
-python ..\src\data_collection\get_fastf1.py
+..\venv\Scripts\python.exe ..\src\data_collection\get_fastf1.py
 
 GOTO loop
 
