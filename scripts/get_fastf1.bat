@@ -3,7 +3,7 @@ SETLOCAL ENABLEDELAYEDEXPANSION
 
 REM Set the raw fastf1 path to target:
 if not exist "..\data\raw\historical\2025" mkdir ..\data\raw\historical\2025
-SET target_dir= "..\data\raw\historical\2025"
+SET target_dir=..\data\raw\historical\2025
 
 :loop
 REM Count number of subfolders:

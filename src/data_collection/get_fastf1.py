@@ -28,7 +28,7 @@ for year in YEARS:
         event_folder = cache_dir / f"{year}/{year}-{event.EventDate.strftime('%m-%d')}_{event.EventName.replace(' ', '_')}"
         if event_folder.exists():
             quali_folder = event_folder / f"{year}-{(event.EventDate - pd.Timedelta(days=1)).strftime('%m-%d')}_Qualifying"
-            if len(os.listdir(quali_folder)) == 10:
+            if quali_folder.exists() and len(os.listdir(quali_folder)) == 10:
                 print(f"Skipping {year} {event.EventName}. Already loaded.")
                 continue
         try:
