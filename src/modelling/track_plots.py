@@ -132,7 +132,6 @@ class PlotTrackMaps:
 
             fig = go.Figure()
             PlotTrackMaps._add_track_line(fig, base_lap, lap_id=lap_id)
-            PlotTrackMaps._add_curvature_layer(fig, base_lap)
 
             zone_rows = PlotTrackMaps._select_zone_rows(
                 track_df=track_df,
@@ -141,6 +140,8 @@ class PlotTrackMaps:
                 max_points=int(max_zone_points),
             )
             PlotTrackMaps._add_zone_layer(fig, zone_rows, zone_col=str(zone_col), prob_threshold=float(prob_threshold))
+
+            PlotTrackMaps._add_curvature_layer(fig, base_lap)
 
             fig.update_layout(
                 title=f"{track_name} — {zone_col} overlay",

@@ -2,6 +2,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import time
+import re
 # plot imports:
 from track_plots import PlotTrackMaps
 # model imports:
@@ -9,23 +10,15 @@ from sklearn.model_selection import GroupShuffleSplit
 from sklearn.ensemble import RandomForestClassifier
 import joblib
 
-HISTORICAL_PROCESSED_DIR = Path(__file__).resolve().parents[2] / "data" / "processed" / "historical"
-MODEL_OUTPUT_DIR = Path(__file__).resolve().parents[2] / "data" / "models"
+F125_PROCESSED_DIR = Path(__file__).resolve().parents[2] / "data" / "processed" / "f1-25" / "laps"
+MODEL_OUTPUT_DIR = Path(__file__).resolve().parents[2] / "data" / "models" / "f1-25"
 # Cache for processed historical data:
-CACHE_DIR = Path(__file__).resolve().parents[2] / "data" / "cache" / "historical"
+CACHE_DIR = Path(__file__).resolve().parents[2] / "data" / "cache" / "f1-25"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
-
-# for circuits with multiple event names -> set to same track name:
-TRACK_ALIASES = {
-    "Styrian_Grand_Prix": "Austrian_Grand_Prix",
-    "Brazilian_Grand_Prix": "São_paulo_Grand_Prix",
-    "70th_Anniversary_Grand_Prix": "British_Grand_Prix",
-    "Mexican_Grand_Prix": "Mexico_City_Grand_Prix",
-}
 
 # feature columns and label details for RF model:
 FEATURE_COLS = ["time", "distance", "x", "y", "z", "speed", "throttle", "brake", "rpm", "gear", "drs",
-                "c", "cb1", "ca1", "c_smooth"] # curvature, curvature before 100m, curvature after 100m + smoothed curvature
+                "c", "cb1", "ca1", "c_smooth", "difficulty"] # curvature, curvature before 100m, curvature after 100m + smoothed curvature
 LABELS = {
     "brake_threshold": 0.1,
     "brake_lift_min": 0.05,
@@ -43,29 +36,34 @@ def load_build_cache(
     if cache_path.exists() and not rebuild:
         return pd.read_pickle(cache_path)
 
-    df = load_historical_laps()
+    df = load_game_laps()
     df = add_curvature_features(df)
     df = add_labels(df)
 
     df.to_pickle(cache_path)
     return df
 
-def load_historical_laps():
+def load_game_laps():
     frames = []
-    if HISTORICAL_PROCESSED_DIR.exists():
-        for track_dir in [p for p in HISTORICAL_PROCESSED_DIR.iterdir() if p.is_dir()]:
-            for fp in track_dir.rglob("*.csv"):
+    laps_root = F125_PROCESSED_DIR
+    if not laps_root.exists():
+        return pd.DataFrame()
+
+    for track_dir in [p for p in laps_root.iterdir() if p.is_dir()]:
+        for difficulty_dir in [p for p in track_dir.iterdir() if p.is_dir()]:
+            for fp in difficulty_dir.rglob("*.csv"):
                 try:
-                    year = int("".join(ch for ch in fp.stem[:4] if ch.isdigit()))
-                    df = pd.read_csv(fp)
-                    df = df.drop(columns=["source"], errors="ignore")
-                    # Get track name - either from directory, or its alias in TRACK_ALIASES:
-                    df["track"] = TRACK_ALIASES.get(track_dir.name, track_dir.name)
+                    m = re.search(r"(19|20)\d{2}", fp.stem)
+                    year = int(m.group(0)) if m else None
+
+                    df = pd.read_csv(fp).drop(columns=["source"], errors="ignore")
+                    df["track"] = track_dir.name
+                    df["difficulty"] = difficulty_dir.name
                     df["year"] = year
                     df["lap_id"] = fp.stem
-                    # get laptime from file name, i.e. after the second underscore:
+
                     parts = fp.stem.split("_")
-                    df["laptime"] = pd.to_numeric(parts[2], errors="coerce")
+                    df["laptime"] = pd.to_numeric(parts[2], errors="coerce") if len(parts) > 2 else pd.NA
                     frames.append(df)
                 except Exception as e:
                     print(f"fail reading {fp}: {e}")
@@ -73,8 +71,7 @@ def load_historical_laps():
         return pd.DataFrame()
 
     out = pd.concat(frames, ignore_index=True)
-    out = out.sort_values(["track", "year", "lap_id", "distance"]).reset_index(drop=True)
-    return out
+    return out.sort_values(["track", "difficulty", "year", "lap_id", "distance"]).reset_index(drop=True)
 
 def label_window_distance(distance_m, event_idx, window_min):
     event_distance_m = distance_m[event_idx]
@@ -360,7 +357,7 @@ class RandomForestModel:
     
     def save_model(self, output: Path = MODEL_OUTPUT_DIR):
         output.mkdir(parents=True, exist_ok=True)
-        path = output / "lap_model.joblib"
+        path = output / "game_model.joblib"
         joblib.dump(
             {
                 "models_by_track": self.models_by_track,
@@ -435,8 +432,7 @@ if __name__ == "__main__":
     print(f"cache loaded: rows={len(df):,} cols={df.shape[1]:,}")
     
     # Generate model if doesn't already exist; otherwise, use existing model:
-    MODEL_PATH_DIR = Path(__file__).resolve().parents[2] / "data" / "models" / "historical"
-    model_path = MODEL_PATH_DIR / "lap_model.joblib"
+    model_path = MODEL_OUTPUT_DIR / "game_model.joblib"
     if not model_path.exists():
         model = RandomForestModel.train_models(df)
         path = model.save_model()
@@ -450,12 +446,13 @@ if __name__ == "__main__":
     plot_paths = PlotTrackMaps.plot_braking_zones_by_track(
         scored,
         out_dir=MODEL_OUTPUT_DIR,
-        prob_threshold=0.5,
+        prob_threshold=0.7,
         zone_col="p_brake_zone",
     )
+    track_name = str(scored["track"].astype(str).iloc[0])
     dist_paths = PlotTrackMaps.plot_curvature_over_distance(
         scored,
-        track="Dutch_Grand_Prix",
+        track=track_name,
         out_dir=MODEL_OUTPUT_DIR,
         lap_id=None,
     )
