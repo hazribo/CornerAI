@@ -23,7 +23,7 @@ TRACK_ALIASES = {
 
 # feature columns and label details for RF model:
 FEATURE_COLS = ["time", "distance", "x", "y", "z", "speed", "throttle", "brake", "rpm", "gear", "drs",
-                "c", "cb1", "ca1"] # curvature, curvature before 100m, curvature after 100m
+                "c", "cb1", "ca1", "c_smooth"] # curvature, curvature before 100m, curvature after 100m + smoothed curvature
 LABELS = {
     "brake_threshold": 0.1,
     "brake_lift_min": 0.05,
@@ -163,19 +163,19 @@ def curvature_context(distance_m, kappa, window_m=100.0):
     ca1 = np.zeros(n, dtype=float)
 
     for i in range(n):
-        left = np.searchsorted(d, d[i] - window_m, side="left")
-        right = np.searchsorted(d, d[i] + window_m, side="right")
+        left = np.searchsorted(d, d[i] - float(window_m), side="left")
+        right = np.searchsorted(d, d[i] + float(window_m), side="right")
 
         if i > left:
-            cb1[i] = k[left:i].mean()
+            cb1[i] = float(np.mean(k[left:i]))
         if right > i + 1:
-            ca1[i] = k[i + 1:right].mean()
+            ca1[i] = float(np.mean(k[i + 1:right]))
 
     return c, cb1, ca1
 
 def add_curvature_features(df):
     out = df.sort_values(["track", "year", "lap_id", "distance"]).copy()
-    for col in ["c", "cb1", "ca1"]:
+    for col in ["c", "cb1", "ca1", "c_smooth"]:
         if col not in out.columns:
             out[col] = 0.0
 
@@ -189,10 +189,13 @@ def add_curvature_features(df):
 
         kappa = get_curvature(x, y)
         c, cb1, ca1 = curvature_context(distance, kappa, window_m=100.0)
+        # calc smoothed curvature using curvature 100m before/after:
+        c_smooth = (0.50 * c) + (0.25 * cb1) + (0.25 * ca1)
 
         out.loc[idx, "c"] = c
         out.loc[idx, "cb1"] = cb1
         out.loc[idx, "ca1"] = ca1
+        out.loc[idx, "c_smooth"] = c_smooth
 
     return out
 
