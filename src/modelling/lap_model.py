@@ -2,6 +2,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import time
+import argparse
 # plotly imports:
 import plotly.graph_objects as go
 import plotly.io as pio
@@ -12,6 +13,9 @@ import joblib
 
 HISTORICAL_PROCESSED_DIR = Path(__file__).resolve().parents[2] / "data" / "processed" / "historical"
 MODEL_OUTPUT_DIR = Path(__file__).resolve().parents[2] / "data" / "models"
+# Cache for processed historical data
+CACHE_DIR = Path(__file__).resolve().parents[2] / "data" / "cache" / "historical"
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # for circuits with multiple event names -> set to same track name:
 TRACK_ALIASES = {
@@ -32,6 +36,21 @@ LABELS = {
     "brake_window_min": 10.0,
     "throttle_window_min": 10.0
 }
+
+def load_build_cache(
+    cache_name: str = "laps_cached.pkl",
+    rebuild: bool = False,
+) -> "pd.DataFrame":
+    cache_path = CACHE_DIR / cache_name
+    if cache_path.exists() and not rebuild:
+        return pd.read_pickle(cache_path)
+
+    df = load_historical_laps()
+    df = add_curvature_features(df)
+    df = add_labels(df)
+
+    df.to_pickle(cache_path)
+    return df
 
 def load_historical_laps():
     frames = []
@@ -381,11 +400,10 @@ class RandomForestModel:
         return bundle
     
     def predict_probability(self, laps: pd.DataFrame):
-        scored = add_curvature_features(laps.copy())
-        scored["p_brake_zone"] = np.nan
-        scored["p_throttle_zone"] = np.nan
+        laps["p_brake_zone"] = np.nan
+        laps["p_throttle_zone"] = np.nan
 
-        for track_name, track_df in scored.groupby("track", sort=False):
+        for track_name, track_df in laps.groupby("track", sort=False):
             track_name = str(track_name)
             if track_name not in self.models_by_track:
                 raise ValueError(f"No trained model found for track='{track_name}'.")
@@ -393,10 +411,10 @@ class RandomForestModel:
             X = track_df[self.feature_cols]
             brake_model = self.models_by_track[track_name]["brake"]
             throttle_model = self.models_by_track[track_name]["throttle"]
-            scored.loc[track_df.index, "p_brake_zone"] = brake_model.predict_proba(X)[:, 1]
-            scored.loc[track_df.index, "p_throttle_zone"] = throttle_model.predict_proba(X)[:, 1]
+            laps.loc[track_df.index, "p_brake_zone"] = brake_model.predict_proba(X)[:, 1]
+            laps.loc[track_df.index, "p_throttle_zone"] = throttle_model.predict_proba(X)[:, 1]
 
-        return scored
+        return laps
     
 class PlotTrackMaps:
     @staticmethod
@@ -500,37 +518,69 @@ class PlotTrackMaps:
             outputs.append(out_path)
 
         return outputs
+    
+    def plot_curvature_over_distance(
+        laps: "pd.DataFrame",
+        track: str,
+        lap_id: str,
+        curvature_col: str = "c_smooth",
+        out_dir: Path = MODEL_OUTPUT_DIR,
+    ):
+        df = laps.copy()
+        if track is not None:
+            df = df.loc[df["track"].astype(str) == str(track)]
+        if df.empty:
+            raise ValueError("No rows found when filtered by track.")
+        
+        if lap_id is None:
+            lap_id = str(df["lap_id"].astype(str).iloc[0])
+        df = df.loc[df["lap_id"].astype(str) == str(lap_id)].sort_values("distance")
+        if df.empty:
+            raise ValueError("No rows found when filtered by lap_id.")
+        
+        if curvature_col not in df.columns:
+            raise ValueError("Missing curvature column.")
+        
+        fig = go.Figure()
+        fig.add_trace(
+            go.Scattergl(
+                x=df["distance"].to_numpy(),
+                y=np.abs(df[curvature_col].to_numpy()),
+                mode="lines",
+                name=f"|{curvature_col}|",
+            )
+        )
+        title_track = str(track) if track is not None else str(df["track"].astype(str).iloc[0])
+        fig.update_layout(
+            title=f"{title_track} — {curvature_col} over distance (lap_id={lap_id})",
+            template="plotly_white",
+            xaxis_title="distance (m)",
+            yaxis_title=f"|{curvature_col}|",
+        )
+
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"{title_track}_{curvature_col}_over_distance.html"
+        pio.write_html(fig, file=str(out_path), auto_open=False, include_plotlyjs="cdn")
+        return out_path
 
 if __name__ == "__main__":
-    laps = load_historical_laps()
-    laps = add_labels(laps)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--rebuild-cache", action="store_true", help="Rebuild cached laps dataset")
+    parser.add_argument("--cache-name", default="laps_cached.pkl")
+    args = parser.parse_args()
+
+    df = load_build_cache(cache_name=args.cache_name, rebuild=args.rebuild_cache)
+    print(f"cache loaded: rows={len(df):,} cols={df.shape[1]:,}")
     # debug:
     # print(f"size of f1_laps: {len(f1_laps)}")
-    #model = RandomForestModel.train_models(laps)
-    #path = model.save_model()
-    #print(f"saved model to {path}")
+    model = RandomForestModel.train_models(df)
+    path = model.save_model()
+    print(f"saved model to {path}")
 
-    model = RandomForestModel.load_model("Z:/CornerAI/data/models/lap_model.joblib")
+    #model = RandomForestModel.load_model("Z:/CornerAI/data/models/lap_model.joblib")
 
-    scored = model.predict_probability(laps)
-
-    # debug testing: advice for one zandvoort lap:
-    track = "Dutch_Grand_Prix"
-    track_df = scored.loc[scored["track"].astype(str) == track].copy()
-    if track_df.empty:
-        raise ValueError(f"No laps found for track='{track}'")
-
-    ref_brake = build_references(track_df, track=track, mode="brake")
-    ref_throttle = build_references(track_df, track=track, mode="throttle")
-
-    slowest_lap = (track_df.groupby("lap_id")["laptime"].first().sort_values().index[-1])
-    lap = track_df.loc[track_df["lap_id"].astype(str) == slowest_lap].copy()
-    advice_df = advice(lap, ref_brake, ref_throttle)
-    print(advice_df)
-
-    advice_out = MODEL_OUTPUT_DIR / f"{track}_advice_{slowest_lap}.csv"
-    advice_df.to_csv(advice_out, index=False)
-    print(f"saved advice to {advice_out}")
+    scored = model.predict_probability(df)
 
     plot_paths = PlotTrackMaps.plot_braking_zones_by_track(
         scored,
@@ -538,4 +588,9 @@ if __name__ == "__main__":
         prob_threshold=0.5,
         zone_col="p_brake_zone",
     )
-    print(f"saved {len(plot_paths)} plots to {MODEL_OUTPUT_DIR}")
+    dist_paths = PlotTrackMaps.plot_curvature_over_distance(
+        scored,
+        track="Dutch_Grand_Prix",
+        lap_id="1",
+    )
+    print(f"saved {len(plot_paths)} plots and {len(dist_paths)} graphs to {MODEL_OUTPUT_DIR}")
