@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import time
 # plot imports:
-from src.modelling.track_plots import PlotTrackMaps
+from track_plots import PlotTrackMaps
 # model imports:
 from sklearn.model_selection import GroupShuffleSplit
 from sklearn.ensemble import RandomForestClassifier
@@ -340,15 +340,17 @@ class RandomForestModel:
     @staticmethod
     def rf_model(seed: int = 19):
         return RandomForestClassifier(
-            n_estimators = 100,
-            max_depth = 20,
-            min_samples_leaf = 20,
-            max_features = "sqrt",
-            max_samples = 0.6,
+            n_estimators = 50,
+            max_depth = 12,
+            min_samples_leaf = 50,
+            min_samples_split = 100,
+            max_features = "log2",
+            bootstrap = True,
+            max_samples = 0.4,
             n_jobs = -1,
             class_weight = "balanced_subsample",
             random_state = seed,
-            verbose=1 # get some output to track model status
+            verbose = 0,
         )
     
     def save_model(self, output: Path = MODEL_OUTPUT_DIR):
@@ -373,7 +375,7 @@ class RandomForestModel:
     
     @staticmethod
     def train_models(laps: pd.DataFrame):
-        training_df = add_curvature_features(laps.copy())
+        training_df = laps.copy()
         bundle = RandomForestModel()
         bundle.feature_cols = list(FEATURE_COLS)
 
@@ -397,7 +399,7 @@ class RandomForestModel:
             throttle_acc = (throttle_model.predict(X.iloc[test_idx]) == y_throttle.iloc[test_idx]).mean()
             end_time = time.perf_counter() - start_time
             print(f"[{track_name}] Accuracies: brake {brake_acc:.4f}, throttle {throttle_acc:.4f}")
-            print(f"Time elapsed for {track_name}: {end_time}")
+            print(f"Time elapsed for {track_name}: {end_time:.2f}s")
 
             bundle.models_by_track[str(track_name)] = {
                 "brake": brake_model,
@@ -426,11 +428,11 @@ class RandomForestModel:
 if __name__ == "__main__":
     df = load_build_cache()
     print(f"cache loaded: rows={len(df):,} cols={df.shape[1]:,}")
-    model = RandomForestModel.train_models(df)
-    path = model.save_model()
-    print(f"saved model to {path}")
+    #model = RandomForestModel.train_models(df)
+    #path = model.save_model()
+    #print(f"saved model to {path}")
 
-    #model = RandomForestModel.load_model("Z:/CornerAI/data/models/lap_model.joblib")
+    model = RandomForestModel.load_model("Z:/CornerAI/data/models/lap_model.joblib")
 
     scored = model.predict_probability(df)
 
@@ -443,6 +445,7 @@ if __name__ == "__main__":
     dist_paths = PlotTrackMaps.plot_curvature_over_distance(
         scored,
         track="Dutch_Grand_Prix",
-        lap_id="1",
+        out_dir=MODEL_OUTPUT_DIR,
+        lap_id=None,
     )
-    print(f"saved {len(plot_paths)} plots and {len(dist_paths)} graphs to {MODEL_OUTPUT_DIR}")
+    print(f"saved {len(plot_paths)} plots and 1 graph to {MODEL_OUTPUT_DIR}")

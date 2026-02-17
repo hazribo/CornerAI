@@ -161,8 +161,8 @@ class PlotTrackMaps:
     def plot_curvature_over_distance(
         laps: "pd.DataFrame",
         track: str,
-        lap_id: str,
         out_dir: Path,
+        lap_id: str | None = None,
         curvature_col: str = "c_smooth",
     ) -> Path:
         df = laps.copy()
