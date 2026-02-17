@@ -2,7 +2,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import time
-import argparse
 # plotly imports:
 import plotly.graph_objects as go
 import plotly.io as pio
@@ -13,7 +12,7 @@ import joblib
 
 HISTORICAL_PROCESSED_DIR = Path(__file__).resolve().parents[2] / "data" / "processed" / "historical"
 MODEL_OUTPUT_DIR = Path(__file__).resolve().parents[2] / "data" / "models"
-# Cache for processed historical data
+# Cache for processed historical data:
 CACHE_DIR = Path(__file__).resolve().parents[2] / "data" / "cache" / "historical"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -136,16 +135,12 @@ def add_labels(df: pd.DataFrame):
 
     return out
 
-########################
-# Curvature Functions  #
-########################
-
 def get_curvature(x, y):
-    x = np.asarray(x, )
-    y = np.asarray(y, )
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
 
     n = len(x)
-    kappa = np.zeros(n, )
+    kappa = np.zeros(n, dtype=float)
     if n < 3:
         return kappa
 
@@ -153,24 +148,37 @@ def get_curvature(x, y):
         A = (x[i - 1], y[i - 1])
         B = (x[i], y[i])
         C = (x[i + 1], y[i + 1])
-        k = calc_curvature(A, B, C)
-        kappa[i] = 0.0 if not np.isfinite(k) else k
+        kappa[i] = calc_curvature(A, B, C)
 
     kappa[0] = kappa[1]
     kappa[-1] = kappa[-2]
     return kappa
 
 def calc_curvature(A, B, C):
-    v1 = np.array(B) - np.array(A)
-    v2 = np.array(C) - np.array(B)
-    
-    angle1 = np.arctan2(v1[1], v1[0])
-    angle2 = np.arctan2(v2[1], v2[0])
-    
+    Ax, Ay = float(A[0]), float(A[1])
+    Bx, By = float(B[0]), float(B[1])
+    Cx, Cy = float(C[0]), float(C[1])
+
+    if not (np.isfinite(Ax) and np.isfinite(Ay) and np.isfinite(Bx) and np.isfinite(By) and np.isfinite(Cx) and np.isfinite(Cy)):
+        return 0.0
+
+    v1 = np.array([Bx - Ax, By - Ay], dtype=float)
+    v2 = np.array([Cx - Bx, Cy - By], dtype=float)
+
+    n1 = float(np.linalg.norm(v1))
+    n2 = float(np.linalg.norm(v2))
+    ds = (n1 + n2) / 2.0
+    if not np.isfinite(ds) or ds <= 1e-9:
+        return 0.0
+
+    angle1 = float(np.arctan2(v1[1], v1[0]))
+    angle2 = float(np.arctan2(v2[1], v2[0]))
+
     d_theta = (angle2 - angle1 + np.pi) % (2 * np.pi) - np.pi
-    ds = (np.linalg.norm(v1) + np.linalg.norm(v2)) / 2
-    
-    return d_theta / ds 
+    if not np.isfinite(d_theta):
+        return 0.0
+
+    return float(d_theta / ds)
 
 def curvature_context(distance_m, kappa, window_m=100.0):
     d = np.asarray(distance_m, dtype=float)
@@ -565,15 +573,8 @@ class PlotTrackMaps:
         return out_path
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--rebuild-cache", action="store_true", help="Rebuild cached laps dataset")
-    parser.add_argument("--cache-name", default="laps_cached.pkl")
-    args = parser.parse_args()
-
-    df = load_build_cache(cache_name=args.cache_name, rebuild=args.rebuild_cache)
+    df = load_build_cache()
     print(f"cache loaded: rows={len(df):,} cols={df.shape[1]:,}")
-    # debug:
-    # print(f"size of f1_laps: {len(f1_laps)}")
     model = RandomForestModel.train_models(df)
     path = model.save_model()
     print(f"saved model to {path}")
