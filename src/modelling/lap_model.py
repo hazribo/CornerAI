@@ -10,7 +10,7 @@ from sklearn.ensemble import RandomForestClassifier
 import joblib
 
 HISTORICAL_PROCESSED_DIR = Path(__file__).resolve().parents[2] / "data" / "processed" / "historical"
-MODEL_OUTPUT_DIR = Path(__file__).resolve().parents[2] / "data" / "models"
+MODEL_OUTPUT_DIR = Path(__file__).resolve().parents[2] / "data" / "models" / "historical"
 # Cache for processed historical data:
 CACHE_DIR = Path(__file__).resolve().parents[2] / "data" / "cache" / "historical"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -435,8 +435,7 @@ if __name__ == "__main__":
     print(f"cache loaded: rows={len(df):,} cols={df.shape[1]:,}")
     
     # Generate model if doesn't already exist; otherwise, use existing model:
-    MODEL_PATH_DIR = Path(__file__).resolve().parents[2] / "data" / "models" / "historical"
-    model_path = MODEL_PATH_DIR / "lap_model.joblib"
+    model_path = MODEL_OUTPUT_DIR / "lap_model.joblib"
     if not model_path.exists():
         model = RandomForestModel.train_models(df)
         path = model.save_model()
