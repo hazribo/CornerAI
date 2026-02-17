@@ -2,9 +2,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import time
-# plotly imports:
-import plotly.graph_objects as go
-import plotly.io as pio
+# plot imports:
+from track_plots import PlotTrackMaps
 # model imports:
 from sklearn.model_selection import GroupShuffleSplit
 from sklearn.ensemble import RandomForestClassifier
@@ -12,6 +11,9 @@ import joblib
 
 HISTORICAL_PROCESSED_DIR = Path(__file__).resolve().parents[2] / "data" / "processed" / "historical"
 MODEL_OUTPUT_DIR = Path(__file__).resolve().parents[2] / "data" / "models"
+# Cache for processed historical data:
+CACHE_DIR = Path(__file__).resolve().parents[2] / "data" / "cache" / "historical"
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # for circuits with multiple event names -> set to same track name:
 TRACK_ALIASES = {
@@ -23,7 +25,7 @@ TRACK_ALIASES = {
 
 # feature columns and label details for RF model:
 FEATURE_COLS = ["time", "distance", "x", "y", "z", "speed", "throttle", "brake", "rpm", "gear", "drs",
-                "curvature"]
+                "c", "cb1", "ca1", "c_smooth"] # curvature, curvature before 100m, curvature after 100m + smoothed curvature
 LABELS = {
     "brake_threshold": 0.1,
     "brake_lift_min": 0.05,
@@ -32,6 +34,21 @@ LABELS = {
     "brake_window_min": 10.0,
     "throttle_window_min": 10.0
 }
+
+def load_build_cache(
+    cache_name: str = "laps_cached.pkl",
+    rebuild: bool = False,
+) -> "pd.DataFrame":
+    cache_path = CACHE_DIR / cache_name
+    if cache_path.exists() and not rebuild:
+        return pd.read_pickle(cache_path)
+
+    df = load_historical_laps()
+    df = add_curvature_features(df)
+    df = add_labels(df)
+
+    df.to_pickle(cache_path)
+    return df
 
 def load_historical_laps():
     frames = []
@@ -80,9 +97,9 @@ def add_labels(df: pd.DataFrame):
     for (_, _, _), lap_df in grouped_data:
         idx = lap_df.index.to_numpy()
 
-        distance = lap_df["distance"].to_numpy(dtype=float)
-        brake = lap_df["brake"].to_numpy(dtype=float)
-        throttle = lap_df["throttle"].to_numpy(dtype=float)
+        distance = lap_df["distance"].to_numpy()
+        brake = lap_df["brake"].to_numpy()
+        throttle = lap_df["throttle"].to_numpy()
 
         # calc both brake and throttle deltas:
         brake_delta = np.diff(brake, prepend=brake[0])
@@ -117,39 +134,99 @@ def add_labels(df: pd.DataFrame):
 
     return out
 
-def curvature(distance_m, x, y):
-    s = np.asarray(distance_m)
-    x = np.asarray(x)
-    y = np.asarray(y)
+def get_curvature(x, y):
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
 
-    # protect from div by zero warnings:
-    ds = np.diff(s)
-    if len(ds) and np.any(ds <= 0):
-        s = s + 1e-6 * np.arange(len(s))
+    n = len(x)
+    kappa = np.zeros(n, dtype=float)
+    if n < 3:
+        return kappa
 
-    dx_ds = np.gradient(x, s)
-    dy_ds = np.gradient(y, s)
+    for i in range(1, n - 1):
+        A = (x[i - 1], y[i - 1])
+        B = (x[i], y[i])
+        C = (x[i + 1], y[i + 1])
+        kappa[i] = calc_curvature(A, B, C)
 
-    theta = np.unwrap(np.arctan2(dy_ds, dx_ds))
-    kappa = np.gradient(theta, s)
+    kappa[0] = kappa[1]
+    kappa[-1] = kappa[-2]
+    return kappa
 
-    return np.nan_to_num(kappa, nan=0.0, posinf=0.0, neginf=0.0)
+def calc_curvature(A, B, C):
+    Ax, Ay = float(A[0]), float(A[1])
+    Bx, By = float(B[0]), float(B[1])
+    Cx, Cy = float(C[0]), float(C[1])
+
+    if not (np.isfinite(Ax) and np.isfinite(Ay) and np.isfinite(Bx) and np.isfinite(By) and np.isfinite(Cx) and np.isfinite(Cy)):
+        return 0.0
+
+    v1 = np.array([Bx - Ax, By - Ay], dtype=float)
+    v2 = np.array([Cx - Bx, Cy - By], dtype=float)
+
+    n1 = float(np.linalg.norm(v1))
+    n2 = float(np.linalg.norm(v2))
+    ds = (n1 + n2) / 2.0
+    if not np.isfinite(ds) or ds <= 1e-9:
+        return 0.0
+
+    angle1 = float(np.arctan2(v1[1], v1[0]))
+    angle2 = float(np.arctan2(v2[1], v2[0]))
+
+    d_theta = (angle2 - angle1 + np.pi) % (2 * np.pi) - np.pi
+    if not np.isfinite(d_theta):
+        return 0.0
+
+    return float(d_theta / ds)
+
+def curvature_context(distance_m, kappa, window_m=100.0):
+    d = np.asarray(distance_m, dtype=float)
+    k = np.abs(np.asarray(kappa, dtype=float))
+
+    n = len(d)
+    c = k.copy()
+    cb1 = np.zeros(n, dtype=float)
+    ca1 = np.zeros(n, dtype=float)
+
+    for i in range(n):
+        left = np.searchsorted(d, d[i] - float(window_m), side="left")
+        right = np.searchsorted(d, d[i] + float(window_m), side="right")
+
+        if i > left:
+            cb1[i] = float(np.mean(k[left:i]))
+        if right > i + 1:
+            ca1[i] = float(np.mean(k[i + 1:right]))
+
+    return c, cb1, ca1
 
 def add_curvature_features(df):
     out = df.sort_values(["track", "year", "lap_id", "distance"]).copy()
-    if "curvature" not in out.columns:
-        out["curvature"] = 0.0
+    for col in ["c", "cb1", "ca1", "c_smooth"]:
+        if col not in out.columns:
+            out[col] = 0.0
 
     grouped_data = out.groupby(["track", "year", "lap_id"], sort=False)
     for (_, _, _), lap_df in grouped_data:
         idx = lap_df.index.to_numpy()
 
         distance = lap_df["distance"].to_numpy(dtype=float)
-        x = lap_df["x"].to_numpy(dtype=float)
-        y = lap_df["y"].to_numpy(dtype=float)
 
-        kappa = curvature(distance, x, y)
-        out.loc[idx, "curvature"] = np.abs(kappa)
+        # Smooth x/y to reduce noise:
+        x_raw = lap_df["x"].to_numpy(dtype=float)
+        y_raw = lap_df["y"].to_numpy(dtype=float)
+        x = pd.Series(x_raw).rolling(window=7, center=True, min_periods=1).median().rolling(window=15, center=True, min_periods=1).mean().to_numpy(dtype=float)
+        y = pd.Series(y_raw).rolling(window=7, center=True, min_periods=1).median().rolling(window=15, center=True, min_periods=1).mean().to_numpy(dtype=float)
+
+        kappa = get_curvature(x, y)
+        c, cb1, ca1 = curvature_context(distance, kappa, window_m=100.0)
+
+        base = (0.50 * c) + (0.25 * cb1) + (0.25 * ca1)
+        c_smooth = pd.Series(base).rolling(window=11, center=True, min_periods=1).median().rolling(window=31, center=True, min_periods=1).mean().to_numpy(dtype=float)
+
+        out.loc[idx, "c"] = c
+        out.loc[idx, "cb1"] = cb1
+        out.loc[idx, "ca1"] = ca1
+        out.loc[idx, "c_smooth"] = c_smooth
 
     return out
 
@@ -268,15 +345,17 @@ class RandomForestModel:
     @staticmethod
     def rf_model(seed: int = 19):
         return RandomForestClassifier(
-            n_estimators = 100,
-            max_depth = 20,
-            min_samples_leaf = 20,
-            max_features = "sqrt",
-            max_samples = 0.6,
+            n_estimators = 50,
+            max_depth = 12,
+            min_samples_leaf = 50,
+            min_samples_split = 100,
+            max_features = "log2",
+            bootstrap = True,
+            max_samples = 0.4,
             n_jobs = -1,
             class_weight = "balanced_subsample",
             random_state = seed,
-            verbose=1 # get some output to track model status
+            verbose = 0,
         )
     
     def save_model(self, output: Path = MODEL_OUTPUT_DIR):
@@ -301,7 +380,7 @@ class RandomForestModel:
     
     @staticmethod
     def train_models(laps: pd.DataFrame):
-        training_df = add_curvature_features(laps.copy())
+        training_df = laps.copy()
         bundle = RandomForestModel()
         bundle.feature_cols = list(FEATURE_COLS)
 
@@ -325,7 +404,7 @@ class RandomForestModel:
             throttle_acc = (throttle_model.predict(X.iloc[test_idx]) == y_throttle.iloc[test_idx]).mean()
             end_time = time.perf_counter() - start_time
             print(f"[{track_name}] Accuracies: brake {brake_acc:.4f}, throttle {throttle_acc:.4f}")
-            print(f"Time elapsed for {track_name}: {end_time}")
+            print(f"Time elapsed for {track_name}: {end_time:.2f}s")
 
             bundle.models_by_track[str(track_name)] = {
                 "brake": brake_model,
@@ -335,11 +414,10 @@ class RandomForestModel:
         return bundle
     
     def predict_probability(self, laps: pd.DataFrame):
-        scored = add_curvature_features(laps.copy())
-        scored["p_brake_zone"] = np.nan
-        scored["p_throttle_zone"] = np.nan
+        laps["p_brake_zone"] = np.nan
+        laps["p_throttle_zone"] = np.nan
 
-        for track_name, track_df in scored.groupby("track", sort=False):
+        for track_name, track_df in laps.groupby("track", sort=False):
             track_name = str(track_name)
             if track_name not in self.models_by_track:
                 raise ValueError(f"No trained model found for track='{track_name}'.")
@@ -347,124 +425,38 @@ class RandomForestModel:
             X = track_df[self.feature_cols]
             brake_model = self.models_by_track[track_name]["brake"]
             throttle_model = self.models_by_track[track_name]["throttle"]
-            scored.loc[track_df.index, "p_brake_zone"] = brake_model.predict_proba(X)[:, 1]
-            scored.loc[track_df.index, "p_throttle_zone"] = throttle_model.predict_proba(X)[:, 1]
+            laps.loc[track_df.index, "p_brake_zone"] = brake_model.predict_proba(X)[:, 1]
+            laps.loc[track_df.index, "p_throttle_zone"] = throttle_model.predict_proba(X)[:, 1]
 
-        return scored
-    
-class PlotTrackMaps:
-    @staticmethod
-    def plot_braking_zones_by_track(
-        laps: pd.DataFrame,
-        out_dir: Path = MODEL_OUTPUT_DIR,
-        prob_threshold: float = 0.5,
-        zone_col: str = "p_brake_zone",
-        max_zone_points: int = 15000,
-    ) -> list[Path]:
-        out_dir = Path(out_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        outputs: list[Path] = []
-
-
-        df = laps.copy()
-
-        for track_name, track_df in df.groupby("track", sort=False):
-            track_name = str(track_name)
-
-            first_lap_id = track_df["lap_id"].astype(str).iloc[0]
-            base_lap = track_df.loc[track_df["lap_id"].astype(str) == first_lap_id].sort_values("distance")
-
-            fig = go.Figure()
-            fig.add_trace(
-                go.Scattergl(
-                    x=base_lap["x"].to_numpy(dtype=float),
-                    y=base_lap["y"].to_numpy(dtype=float),
-                    mode="lines",
-                    name=f"Track map (lap_id={first_lap_id})",
-                    line=dict(color="rgba(0,0,0,0.6)", width=2),
-                    hoverinfo="skip",
-                )
-            )
-
-            if zone_col.startswith("p_"):
-                zone_rows = track_df.loc[track_df[zone_col].astype(float) >= float(prob_threshold)].copy()
-            else:
-                zone_rows = track_df.loc[track_df[zone_col].astype(int) == 1].copy()
-
-            if not zone_rows.empty:
-                # keep plot responsive if there are tons of points
-                if len(zone_rows) > max_zone_points:
-                    zone_rows = zone_rows.sample(n=max_zone_points, random_state=19)
-
-                zone_rows = zone_rows.sort_values("distance")
-
-                fig.add_trace(
-                    go.Scattergl(
-                        x=zone_rows["x"].to_numpy(dtype=float),
-                        y=zone_rows["y"].to_numpy(dtype=float),
-                        mode="markers",
-                        name=f"Braking zones ({zone_col})",
-                        marker=dict(size=6, color="rgba(220,20,60,0.95)"),
-                        customdata=np.c_[
-                            zone_rows["distance"].to_numpy(dtype=float),
-                            zone_rows[zone_col].to_numpy(dtype=float),
-                            zone_rows["curvature"].to_numpy(),
-                        ],
-                        hovertemplate="BRAKE<br>dist=%{customdata[0]:.1f}m<br>p=%{customdata[1]:.3f}"
-                        "<br>curvature=%{customdata[2]:.3f}<extra></extra>",
-                    )
-                )
-
-            fig.update_layout(
-                title=f"{track_name} — braking zones ({zone_col}{'' if not zone_col.startswith('p_') else f' >= {prob_threshold}'})",
-                template="plotly_white",
-                xaxis_title="x",
-                yaxis_title="y",
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-            )
-            fig.update_yaxes(scaleanchor="x", scaleratio=1)
-
-            out_path = out_dir / f"{track_name}_braking_zones.html"
-            pio.write_html(fig, file=str(out_path), auto_open=False, include_plotlyjs="cdn")
-            outputs.append(out_path)
-
-        return outputs
+        return laps
 
 if __name__ == "__main__":
-    laps = load_historical_laps()
-    #laps = add_labels(laps)
-    # debug:
-    # print(f"size of f1_laps: {len(f1_laps)}")
-    #model = RandomForestModel.train_models(labelled_laps)
-    #path = model.save_model()
-    #print(f"saved model to {path}")
+    df = load_build_cache()
+    print(f"cache loaded: rows={len(df):,} cols={df.shape[1]:,}")
+    
+    # Generate model if doesn't already exist; otherwise, use existing model:
+    MODEL_PATH_DIR = Path(__file__).resolve().parents[2] / "data" / "models" 
+    model_path = MODEL_PATH_DIR / "lap_model.joblib"
+    if not model_path.exists():
+        model = RandomForestModel.train_models(df)
+        path = model.save_model()
+        print(f"Saved model to {path}.")
+    else:
+        model = RandomForestModel.load_model(model_path)
+        print(f"Loaded model from {model_path}.")
 
-    model = RandomForestModel.load_model("Z:/CornerAI/data/models/lap_model.joblib")
+    scored = model.predict_probability(df)
 
-    scored = model.predict_probability(laps)
-
-    # debug testing: advice for one zandvoort lap:
-    track = "Dutch_Grand_Prix"
-    track_df = scored.loc[scored["track"].astype(str) == track].copy()
-    if track_df.empty:
-        raise ValueError(f"No laps found for track='{track}'")
-
-    ref_brake = build_references(track_df, track=track, mode="brake")
-    ref_throttle = build_references(track_df, track=track, mode="throttle")
-
-    slowest_lap = (track_df.groupby("lap_id")["laptime"].first().sort_values().index[-1])
-    lap = track_df.loc[track_df["lap_id"].astype(str) == slowest_lap].copy()
-    advice_df = advice(lap, ref_brake, ref_throttle)
-    print(advice_df)
-
-    advice_out = MODEL_OUTPUT_DIR / f"{track}_advice_{slowest_lap}.csv"
-    advice_df.to_csv(advice_out, index=False)
-    print(f"saved advice to {advice_out}")
-
-    #plot_paths = PlotTrackMaps.plot_braking_zones_by_track(
-    #    scored,
-    #    out_dir=MODEL_OUTPUT_DIR,
-    #    prob_threshold=0.5,
-    #    zone_col="p_brake_zone",
-    #)
-    #print(f"saved {len(plot_paths)} plots to {MODEL_OUTPUT_DIR}")
+    plot_paths = PlotTrackMaps.plot_braking_zones_by_track(
+        scored,
+        out_dir=MODEL_OUTPUT_DIR,
+        prob_threshold=0.5,
+        zone_col="p_brake_zone",
+    )
+    dist_paths = PlotTrackMaps.plot_curvature_over_distance(
+        scored,
+        track="Dutch_Grand_Prix",
+        out_dir=MODEL_OUTPUT_DIR,
+        lap_id=None,
+    )
+    print(f"saved {len(plot_paths)} plots and 1 graph to {MODEL_OUTPUT_DIR}")
