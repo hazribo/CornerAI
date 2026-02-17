@@ -11,8 +11,8 @@ def clean(filepath):
 
     
     df["distance"] = df_raw["lapdistance [m]"]
-    df["x"] = df_raw["x [m]"]
-    df["y"] = df_raw["z [m]"] # swap y and z
+    df["x"] = df_raw["z [m]"] # swap x and z
+    df["y"] = df_raw["x [m]"] # swap y and z (x)
     df["z"] = df_raw["y [m]"]
     # Normalise speed to 0-1:
     speed = pd.to_numeric(df_raw["speed [m/s]"], errors="coerce")
@@ -32,6 +32,7 @@ def clean(filepath):
     df["time"] = df_raw["laptime [s]"]
     
     df = df.sort_values("distance").reset_index(drop=True)
+
     df["source"] = "f125"
     return df
 
