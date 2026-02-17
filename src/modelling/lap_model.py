@@ -210,13 +210,18 @@ def add_curvature_features(df):
         idx = lap_df.index.to_numpy()
 
         distance = lap_df["distance"].to_numpy(dtype=float)
-        x = lap_df["x"].to_numpy(dtype=float)
-        y = lap_df["y"].to_numpy(dtype=float)
+
+        # Smooth x/y to reduce noise:
+        x_raw = lap_df["x"].to_numpy(dtype=float)
+        y_raw = lap_df["y"].to_numpy(dtype=float)
+        x = pd.Series(x_raw).rolling(window=7, center=True, min_periods=1).median().rolling(window=15, center=True, min_periods=1).mean().to_numpy(dtype=float)
+        y = pd.Series(y_raw).rolling(window=7, center=True, min_periods=1).median().rolling(window=15, center=True, min_periods=1).mean().to_numpy(dtype=float)
 
         kappa = get_curvature(x, y)
         c, cb1, ca1 = curvature_context(distance, kappa, window_m=100.0)
-        # calc smoothed curvature using curvature 100m before/after:
-        c_smooth = (0.50 * c) + (0.25 * cb1) + (0.25 * ca1)
+
+        base = (0.50 * c) + (0.25 * cb1) + (0.25 * ca1)
+        c_smooth = pd.Series(base).rolling(window=11, center=True, min_periods=1).median().rolling(window=31, center=True, min_periods=1).mean().to_numpy(dtype=float)
 
         out.loc[idx, "c"] = c
         out.loc[idx, "cb1"] = cb1
@@ -428,11 +433,17 @@ class RandomForestModel:
 if __name__ == "__main__":
     df = load_build_cache()
     print(f"cache loaded: rows={len(df):,} cols={df.shape[1]:,}")
-    #model = RandomForestModel.train_models(df)
-    #path = model.save_model()
-    #print(f"saved model to {path}")
-
-    model = RandomForestModel.load_model("Z:/CornerAI/data/models/lap_model.joblib")
+    
+    # Generate model if doesn't already exist; otherwise, use existing model:
+    MODEL_PATH_DIR = Path(__file__).resolve().parents[2] / "data" / "models" 
+    model_path = MODEL_PATH_DIR / "lap_model.joblib"
+    if not model_path.exists():
+        model = RandomForestModel.train_models(df)
+        path = model.save_model()
+        print(f"Saved model to {path}.")
+    else:
+        model = RandomForestModel.load_model(model_path)
+        print(f"Loaded model from {model_path}.")
 
     scored = model.predict_probability(df)
 
