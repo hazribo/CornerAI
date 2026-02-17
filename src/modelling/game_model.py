@@ -3,8 +3,9 @@ import numpy as np
 import pandas as pd
 import time
 import re
-# plot imports:
+# other file imports:
 from track_plots import PlotTrackMaps
+from game_advice import build_references, advice, write_advice
 # model imports:
 from sklearn.model_selection import GroupShuffleSplit
 from sklearn.ensemble import RandomForestClassifier
@@ -259,12 +260,11 @@ def build_track_ground_truth(
     gt["c_exp_ahead"] = gt["c_exp"].shift(-3).fillna(gt["c_exp"])
     return gt
 
-
 def add_should_brake(
     lap_df: pd.DataFrame,
     gt: pd.DataFrame,
-    speed_margin: float = 3.0,
-    curv_margin: float = 0.0005,
+    speed_margin: float = 0.03,
+    curv_margin: float = 0.0002,
     brake_prob_min: float = 0.5,
 ) -> pd.DataFrame:
     
@@ -395,11 +395,11 @@ if __name__ == "__main__":
         model = RandomForestModel.load_model(model_path)
         print(f"Loaded model from {model_path}.")
 
-    # Score tracks and then get ground truths:
+    # Score tracks and then get ground truths & advice:
     scored = model.predict_probability(df)
     gt_by_track: dict[str, pd.DataFrame] = {}
     annotated_laps: list[pd.DataFrame] = []
-    
+
     for track_name, track_df in scored.groupby("track", sort=False):
         gt = build_track_ground_truth(scored, track=str(track_name), bin_m=5.0)
         gt_by_track[str(track_name)] = gt
@@ -407,6 +407,26 @@ if __name__ == "__main__":
             annotated_laps.append(add_should_brake(lap_df, gt))
 
     scored = pd.concat(annotated_laps, ignore_index=True)
+
+    ##############################################################
+    # testing advice:
+    target_track = "1 melbourne"
+    target_lap_id = "melbourne_Q_79.789_aston_martin_STR_L1_2026-02-16_opponent_clean"
+
+    selected = scored.copy()
+    selected = selected.loc[selected["track"].astype(str) == str(target_track)]
+    lap_df = selected.loc[selected["lap_id"].astype(str) == str(target_lap_id)].sort_values("distance")
+    lap_id = str(target_lap_id)
+    track_name = str(lap_df["track"].astype(str).iloc[0])
+
+    ref_brake = build_references(scored, track=track_name, mode="brake")
+    ref_throttle = build_references(scored, track=track_name, mode="throttle")
+    advice_df = advice(lap_df, ref_brake, ref_throttle)
+
+    txt_path = MODEL_OUTPUT_DIR / f"{track_name}_{lap_id}_advice.txt"
+    write_advice(advice_df, txt_path, track_name, lap_id)
+    print(f"saved advice: {txt_path}")
+    ##############################################################
 
     # Save to csv per track:
     for t, gt in gt_by_track.items():
