@@ -117,6 +117,10 @@ def add_labels(df: pd.DataFrame):
 
     return out
 
+########################
+# Curvature Functions  #
+########################
+
 def get_curvature(x, y):
     x = np.asarray(x, )
     y = np.asarray(y, )
@@ -146,11 +150,8 @@ def calc_curvature(A, B, C):
     
     d_theta = (angle2 - angle1 + np.pi) % (2 * np.pi) - np.pi
     ds = (np.linalg.norm(v1) + np.linalg.norm(v2)) / 2
-
-    if not np.isfinite(ds) or ds <= 1e-12:
-        return 0.0
-
-    return d_theta / ds
+    
+    return d_theta / ds 
 
 def curvature_context(distance_m, kappa, window_m=100.0):
     d = np.asarray(distance_m, dtype=float)
@@ -428,6 +429,7 @@ class PlotTrackMaps:
                 )
             )
             
+            # Add current curvature colour to track map:
             curv = base_lap["c"].to_numpy()
             fig.add_trace(
                 go.Scattergl(
@@ -471,7 +473,7 @@ class PlotTrackMaps:
                         customdata=np.c_[
                             zone_rows["distance"].to_numpy(),
                             zone_rows[zone_col].to_numpy(),
-                            curv_vals,
+                            zone_rows["curvature"].to_numpy(),
                         ],
                         hovertemplate=(
                             "BRAKE<br>dist=%{customdata[0]:.1f}m"
