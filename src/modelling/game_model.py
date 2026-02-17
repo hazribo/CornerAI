@@ -227,112 +227,66 @@ def add_curvature_features(df):
 
     return out
 
-def extract_events(lap, prob_col):
-    # Gets a list of distances where "events" happen.
-    # i.e.: upwards threshold crossing of prob_col (spaced by min separation)
-    threshold = float(0.6)
-    min_sep = float(40.0)
+def build_track_ground_truth(
+    laps: pd.DataFrame,
+    track: str,
+    bin_m: float = 5.0,
+) -> pd.DataFrame:
+    """
+    Distance-domain template for one track:
+    expected x/y, curvature, speed, brake likelihood.
+    """
+    d = laps.loc[laps["track"].astype(str) == str(track)].copy()
+    if d.empty:
+        return pd.DataFrame()
 
-    df = lap.sort_values("distance")
-    distance = df["distance"].to_numpy()
-    prob = df[prob_col].to_numpy()
+    brake_col = "p_brake_zone" if "p_brake_zone" in d.columns else "y_brake_zone"
+    d["dist_bin"] = (d["distance"].astype(float) / float(bin_m)).round().astype(int) * float(bin_m)
 
-    idx = np.where((prob[1:] >= threshold) & (prob[:-1] < threshold))[0] + 1
+    gt = (
+        d.groupby("dist_bin", as_index=False)
+         .agg(
+             distance=("dist_bin", "first"),
+             x_exp=("x", "mean"),
+             y_exp=("y", "mean"),
+             c_exp=("c_smooth", "mean"),
+             speed_exp=("speed", "mean"),
+             p_brake_exp=(brake_col, "mean"),
+         )
+         .sort_values("distance")
+         .reset_index(drop=True)
+    )
+    gt["c_exp_ahead"] = gt["c_exp"].shift(-3).fillna(gt["c_exp"])
+    return gt
 
-    events: list[float] = []
-    in_event = False
 
-    for i in range(len(prob)):
-        p = float(prob[i])
-
-        if not in_event:
-            prev_p = float(prob[i - 1]) if i > 0 else 0.0
-            if p >= threshold and prev_p <= (1 - threshold):
-                events.append(float(distance[i]))
-                in_event = True
-        else:
-            if p <= (1 - threshold):
-                in_event = False
+def add_should_brake(
+    lap_df: pd.DataFrame,
+    gt: pd.DataFrame,
+    speed_margin: float = 3.0,
+    curv_margin: float = 0.0005,
+    brake_prob_min: float = 0.5,
+) -> pd.DataFrame:
     
-    return events
+    if lap_df.empty or gt.empty:
+        out = lap_df.copy()
+        out["should_brake"] = 0
+        return out
 
-def nearest_event(lap: float, refs: list[float]):
-    tolerance = float(80.0)
-    if not refs:
-        return None
-    array = np.asarray(refs)
-    i = int(np.argmin(np.abs(array - float(lap))))
-    best = float(array[i])
-    return best if abs(best - float(lap)) <= tolerance else None
+    out = pd.merge_asof(
+        lap_df.sort_values("distance"),
+        gt[["distance", "x_exp", "y_exp", "c_exp", "c_exp_ahead", "speed_exp", "p_brake_exp"]].sort_values("distance"),
+        on="distance",
+        direction="nearest",
+    )
 
-def build_references(scored_laps: pd.DataFrame, track: str, mode: str):
-    top_percent = float(0.2)
+    out["should_brake"] = (
+        (out["speed"] > out["speed_exp"] + float(speed_margin)) &
+        (out["c_exp_ahead"] > out["c_exp"] + float(curv_margin)) &
+        (out["p_brake_exp"] >= float(brake_prob_min))
+    ).astype(int)
 
-    if mode not in ["brake", "throttle"]:
-        raise ValueError(f"{mode} not 'brake' or 'throttle'.")
-
-    # get probability for correct attribute (brake or throttle)
-    prob_col = "p_brake_zone" if mode == "brake" else "p_throttle_zone"
-
-    df = scored_laps.loc[scored_laps["track"].astype(str) == str(track)].copy()
-    lap_times = (df.groupby("lap_id")["laptime"].first().sort_values())
-
-    n_keep = max(1, int(round(len(lap_times) * float(top_percent))))
-    keep_ids = set(lap_times.index[:n_keep])
-
-    # get event lists (one per lap):
-    event_list: list[list[float]] = []
-    df_filter = df.loc[df["lap_id"].isin(keep_ids)]
-    for _, lap_df in df_filter.groupby("lap_id"):
-        event_list.append(extract_events(lap_df, prob_col))
-    
-    # get median by event index:
-    # (this is to stop "pedantic" improvements like "brake 1 metre earlier")
-    max_len = max((len(ev) for ev in event_list), default=0)
-    true_events: list[float] = []
-
-    for i in range(max_len):
-        values = [event[i] for event in event_list if len(event) > i]
-        if values:
-            true_events.append(float(np.median(values)))
-
-    return true_events
-
-def advice(lap: pd.DataFrame, ref_brake: list[float], ref_throttle: list[float]):
-    df = lap.sort_values("distance")
-    brake = extract_events(df, "p_brake_zone")
-    throttle = extract_events(df, "p_throttle_zone")
-    rows: list[dict] = []
-
-    def add(mode: str, events: list[float], refs: list[float]):
-        remaining = list(events)
-
-        for i, ref_d in enumerate(refs):
-            lap_d = nearest_event(ref_d, remaining)
-            if lap_d is None:
-                continue
-            remaining.remove(lap_d)
-
-            delta = float(lap_d - ref_d)
-            # "placeholder" advice for now:
-            if mode == "brake":
-                advice = f"Brake {delta:.1f}m earlier" if delta > 0 else f"Brake {delta*-1:.1f}m later"
-            else:
-                advice = f"Throttle {delta:.1f}m earlier" if delta > 0 else f"Throttle {delta*-1:.1f}m later"
-
-            rows.append(
-                {
-                    "mode": mode,
-                    "corner_index": i,
-                    "lap_distance": lap_d,
-                    "ref_distance": ref_d,
-                    "delta": delta,
-                    "advice": advice
-                }
-            )
-    add("brake", brake, ref_brake)
-    add("throttle", throttle, ref_throttle)
-    return pd.DataFrame(rows).sort_values(["mode", "corner_index"]).reset_index()
+    return out
 
 class RandomForestModel:
     def __init__(self):
@@ -441,7 +395,22 @@ if __name__ == "__main__":
         model = RandomForestModel.load_model(model_path)
         print(f"Loaded model from {model_path}.")
 
+    # Score tracks and then get ground truths:
     scored = model.predict_probability(df)
+    gt_by_track: dict[str, pd.DataFrame] = {}
+    annotated_laps: list[pd.DataFrame] = []
+    
+    for track_name, track_df in scored.groupby("track", sort=False):
+        gt = build_track_ground_truth(scored, track=str(track_name), bin_m=5.0)
+        gt_by_track[str(track_name)] = gt
+        for _, lap_df in track_df.groupby("lap_id", sort=False):
+            annotated_laps.append(add_should_brake(lap_df, gt))
+
+    scored = pd.concat(annotated_laps, ignore_index=True)
+
+    # Save to csv per track:
+    for t, gt in gt_by_track.items():
+        gt.to_csv(MODEL_OUTPUT_DIR / f"{t}_ground_truth.csv")
 
     plot_paths = PlotTrackMaps.plot_braking_zones_by_track(
         scored,
