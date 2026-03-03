@@ -411,20 +411,24 @@ if __name__ == "__main__":
     ##############################################################
     # testing advice:
     target_track = "1 melbourne"
-    target_lap_id = "melbourne_Q_79.789_aston_martin_STR_L1_2026-02-16_opponent_clean"
+    target_lap_id = Path(r"Z:\CornerAI\data\processed\f1-25\laps\1 melbourne\lap_1.csv")
 
-    selected = scored.copy()
-    selected = selected.loc[selected["track"].astype(str) == str(target_track)]
-    lap_df = selected.loc[selected["lap_id"].astype(str) == str(target_lap_id)].sort_values("distance")
-    lap_id = str(target_lap_id)
-    track_name = str(lap_df["track"].astype(str).iloc[0])
+    player_lap = pd.read_csv(target_lap_id)
 
+    player_lap = add_curvature_features(player_lap)
+    player_lap = model.predict_probability(player_lap)
+    gt = gt_by_track.get(target_track, pd.DataFrame())
+    lap_df = add_should_brake(player_lap, gt).sort_values("distance")
+
+    track_name = target_track
+
+    # Build references from the dataset (scored), but generate advice for the player lap (lap_df)
     ref_brake = build_references(scored, track=track_name, mode="brake")
     ref_throttle = build_references(scored, track=track_name, mode="throttle")
     advice_df = advice(lap_df, ref_brake, ref_throttle)
 
-    txt_path = MODEL_OUTPUT_DIR / f"{track_name}_{lap_id}_advice.txt"
-    write_advice(advice_df, txt_path, track_name, lap_id)
+    txt_path = MODEL_OUTPUT_DIR / f"{track_name}_player_advice.txt"
+    write_advice(advice_df, txt_path, track_name, lap_id="player")
     print(f"saved advice: {txt_path}")
     ##############################################################
 
