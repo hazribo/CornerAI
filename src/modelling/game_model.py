@@ -242,6 +242,7 @@ def build_track_ground_truth(
         return pd.DataFrame()
 
     brake_col = "p_brake_zone" if "p_brake_zone" in d.columns else "y_brake_zone"
+    throttle_col = "p_throttle_zone" if "p_throttle_zone" in d.columns else "y_throttle_zone"
     d["dist_bin"] = (d["distance"].astype(float) / float(bin_m)).round().astype(int) * float(bin_m)
 
     gt = (
@@ -253,6 +254,7 @@ def build_track_ground_truth(
              c_exp=("c_smooth", "mean"),
              speed_exp=("speed", "mean"),
              p_brake_exp=(brake_col, "mean"),
+             p_throttle_exp=(throttle_col, "mean"),
          )
          .sort_values("distance")
          .reset_index(drop=True)
@@ -285,6 +287,30 @@ def add_should_brake(
         (out["c_exp_ahead"] > out["c_exp"] + float(curv_margin)) &
         (out["p_brake_exp"] >= float(brake_prob_min))
     ).astype(int)
+
+    return out
+
+def add_should_throttle(
+    lap_df: pd.DataFrame,
+    gt: pd.DataFrame,
+    curv_margin: float = 0.0002,
+    throttle_prob_min: float = 0.5,
+) -> pd.DataFrame:
+    
+    if lap_df.empty or gt.empty:
+        out = lap_df.copy()
+        out["should_throttle"] = 0
+        return out
+
+    merge_cols = ["distance", "p_throttle_exp"]
+    out = pd.merge_asof(
+        lap_df.sort_values("distance"),
+        gt[merge_cols].sort_values("distance"),
+        on="distance",
+        direction="nearest",
+    )
+
+    out["should_throttle"] = (out["p_throttle_exp"] >= float(throttle_prob_min)).astype(int)
 
     return out
 
@@ -404,7 +430,9 @@ if __name__ == "__main__":
         gt = build_track_ground_truth(scored, track=str(track_name), bin_m=5.0)
         gt_by_track[str(track_name)] = gt
         for _, lap_df in track_df.groupby("lap_id", sort=False):
-            annotated_laps.append(add_should_brake(lap_df, gt))
+            lap_df = add_should_brake(lap_df, gt)
+            lap_df = add_should_throttle(lap_df, gt)
+            annotated_laps.append(lap_df)
 
     scored = pd.concat(annotated_laps, ignore_index=True)
 
@@ -418,7 +446,8 @@ if __name__ == "__main__":
     player_lap = add_curvature_features(player_lap)
     player_lap = model.predict_probability(player_lap)
     gt = gt_by_track.get(target_track, pd.DataFrame())
-    lap_df = add_should_brake(player_lap, gt).sort_values("distance")
+    lap_df = add_should_brake(player_lap, gt)
+    lap_df = add_should_throttle(lap_df, gt).sort_values("distance")
 
     track_name = target_track
 

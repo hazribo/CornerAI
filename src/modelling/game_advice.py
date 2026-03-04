@@ -5,7 +5,12 @@ import pandas as pd
 def extract_events(lap, signal_col):
     # Gets a list of distances where "events" happen.
     # i.e.: upwards threshold crossing of signal_col (spaced by min separation)
-    threshold = float(0.6)
+    if signal_col == "brake":
+        threshold = 0.1
+    elif signal_col == "throttle":
+        threshold = 0.1
+    else:
+        threshold = 0.5
     min_sep = 40.0
 
     df = lap.sort_values("distance")
@@ -15,22 +20,20 @@ def extract_events(lap, signal_col):
     if len(signal) < 2:
         return []
 
-    # detect binary vs probability series:
-    uniq = np.unique(signal[~np.isnan(signal)])
-    is_binary = np.all(np.isin(uniq, [0.0, 1.0]))
-
-    if is_binary:
-        idx = np.where((signal[1:] == 1.0) & (signal[:-1] == 0.0))[0] + 1
-    else:
-        idx = np.where((signal[1:] >= threshold) & (signal[:-1] < threshold))[0] + 1
+    # Find specifically where signal crosses the threshold:
+    above = signal >= threshold
+    prev_above = np.roll(above, 1)
+    prev_above[0] = False
+    
+    idx = np.where(above & ~prev_above)[0]
 
     events = []
-    last = -1e18
+    last_dist = -1e18
     for i in idx:
-        d = float(distance[i])
-        if d - last >= min_sep:
-            events.append(d)
-            last = d
+        dist = float(distance[i])
+        if dist - last_dist > min_sep:
+            events.append(float(dist))
+            last_dist = dist
     return events
 
 def nearest_event(lap: float, refs: list[float]):
@@ -48,10 +51,10 @@ def build_references(scored_laps: pd.DataFrame, track: str, mode: str):
     if mode not in ["brake", "throttle"]:
         raise ValueError(f"{mode} not 'brake' or 'throttle'.")
 
-    # get probability for correct attribute (brake or throttle)
-    prob_col = "should_brake" if (mode == "brake" and "should_brake" in scored_laps.columns) else (
-        "p_brake_zone" if mode == "brake" else "p_throttle_zone"
-    )
+    if mode == "brake":
+        prob_col = "should_brake" if "should_brake" in scored_laps.columns else "p_brake_zone"
+    else:
+        prob_col = "should_throttle" if "should_throttle" in scored_laps.columns else "p_throttle_zone"
 
     df = scored_laps.loc[scored_laps["track"].astype(str) == str(track)].copy()
     lap_times = (df.groupby("lap_id")["laptime"].first().sort_values())
@@ -59,14 +62,11 @@ def build_references(scored_laps: pd.DataFrame, track: str, mode: str):
     n_keep = max(1, int(round(len(lap_times) * float(top_percent))))
     keep_ids = set(lap_times.index[:n_keep])
 
-    # get event lists (one per lap):
     event_list: list[list[float]] = []
     df_filter = df.loc[df["lap_id"].isin(keep_ids)]
     for _, lap_df in df_filter.groupby("lap_id", sort=False):
         event_list.append(extract_events(lap_df, prob_col))
     
-    # get median by event index:
-    # (this is to stop "pedantic" improvements like "brake 1 metre earlier")
     max_len = max((len(ev) for ev in event_list), default=0)
     true_events: list[float] = []
 
@@ -79,42 +79,46 @@ def build_references(scored_laps: pd.DataFrame, track: str, mode: str):
 
 def advice(lap: pd.DataFrame, ref_brake: list[float], ref_throttle: list[float]):
     df = lap.sort_values("distance")
-    brake_col = "should_brake" if "should_brake" in df.columns else "p_brake_zone"
-    brake = extract_events(df, brake_col)
-    if len(brake) == 0 and "p_brake_zone" in df.columns:
-        brake = extract_events(df, "p_brake_zone")
-    throttle = extract_events(df, "p_throttle_zone")
+    brake = extract_events(df, "brake")
+    throttle = extract_events(df, "throttle")
+
     rows: list[dict] = []
-
     def add(mode: str, events: list[float], refs: list[float]):
-        remaining = list(events)
-
         for i, ref_d in enumerate(refs):
-            lap_d = nearest_event(ref_d, remaining)
+            lap_d = nearest_event(ref_d, events)
             if lap_d is None:
                 continue
-            remaining.remove(lap_d)
-
-            delta = float(lap_d - ref_d)
-            # "placeholder" advice for now:
+            
+            delta = float(lap_d) - float(ref_d)
+            
             if mode == "brake":
-                advice = f"Brake {delta:.1f}m earlier" if delta > 0 else f"Brake {delta*-1:.1f}m later"
-            else:
-                advice = f"Throttle {delta:.1f}m earlier" if delta > 0 else f"Throttle {delta*-1:.1f}m later"
+                if delta < 0:
+                    advice_text = f"Brake {abs(delta):.1f}m earlier"
+                else:
+                    advice_text = f"Brake {abs(delta):.1f}m later"
+            elif mode == "throttle":
+                if delta < 0:
+                    advice_text = f"Throttle {abs(delta):.1f}m earlier"
+                else:
+                    advice_text = f"Throttle {abs(delta):.1f}m later"
 
-            rows.append(
-                {
-                    "mode": mode,
-                    "zone_index": i+1, # start counting from 1
-                    "lap_distance": lap_d,
-                    "ref_distance": ref_d,
-                    "delta": delta,
-                    "advice": advice
-                }
-            )
+            rows.append({
+                "mode": mode,
+                "zone_index": i+1,
+                "lap_distance": round(float(lap_d), 1),
+                "ref_distance": round(float(ref_d), 1),
+                "delta": round(delta, 1),
+                "advice": advice_text
+            })
+
     add("brake", brake, ref_brake)
     add("throttle", throttle, ref_throttle)
-    return pd.DataFrame(rows).sort_values(["mode", "zone_index"]).reset_index(drop=True)
+
+    out_df = pd.DataFrame(rows, columns=[
+        "mode", "zone_index", "lap_distance", "ref_distance", "delta", "advice"
+    ])
+    
+    return out_df.sort_values(["mode", "zone_index"]).reset_index(drop=True)
 
 def write_advice(advice_df: pd.DataFrame, out_path: Path, track_name: str, lap_id: str) -> Path:
     lines = [f"Track: {track_name}", f"Lap: {lap_id}", ""]
