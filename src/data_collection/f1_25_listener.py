@@ -42,8 +42,8 @@ def save_lap_csv(filename, car_index, lap_number, lap_time_ms, data_points):
     max_speed = speed.max(skipna=True)
     df["speed"] = speed / max_speed
     # Normalise throttle, brake, steering to 0-1:
-    df["throttle"] = df_raw["throttle"].astype(float) / 100.0
-    df["brake"] = df_raw["brake"].astype(float) / 100.0
+    df["throttle"] = df_raw["throttle"].astype(float)
+    df["brake"] = df_raw["brake"].astype(float)
 
     #df["steer"] = df_raw["steer [%]"].astype(float) / 100.0
     # uncomment at a later date if steering info can be gathered from ff1.
