@@ -197,6 +197,14 @@ def curvature_context(distance_m, kappa, window_m=100.0):
 
     return c, cb1, ca1
 
+# Instead of this (below):
+# def add_curv_cols(df, n_cols, dist_interval)
+"""
+Rather than hard-coded curvature before 100m, curvature after 100m;
+add curvature columns for every dist_interval metres into the file.
+This allows for curvature before/after to be retrieved directly from the file,
+allows dynamic testing across different interval lengths to see which performs best.
+"""
 def add_curvature_features(df):
     out = df.sort_values(["track", "year", "lap_id", "distance"]).copy()
     for col in ["c", "cb1", "ca1", "c_smooth"]:
