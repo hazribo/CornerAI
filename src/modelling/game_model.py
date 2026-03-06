@@ -36,8 +36,9 @@ LABELS = {
 def load_build_cache(
     cache_name: str = "laps_cached.pkl",
     rebuild: bool = False,
+    cache_dir=CACHE_DIR,
 ) -> "pd.DataFrame":
-    cache_path = CACHE_DIR / cache_name
+    cache_path = cache_dir / cache_name
     if cache_path.exists() and not rebuild:
         return pd.read_pickle(cache_path)
 
@@ -136,13 +137,25 @@ def add_labels(df: pd.DataFrame):
 
     return out
 
-def get_curvature(x, y):
-    x = np.asarray(x, dtype=float)
-    y = np.asarray(y, dtype=float)
+class Curvature:
+    @staticmethod
+    def get_curvature(x, y):
+        x = np.asarray(x, dtype=float)
+        y = np.asarray(y, dtype=float)
 
-    n = len(x)
-    kappa = np.zeros(n, dtype=float)
-    if n < 3:
+        n = len(x)
+        kappa = np.zeros(n, dtype=float)
+        if n < 3:
+            return kappa
+
+        for i in range(1, n - 1):
+            A = (x[i - 1], y[i - 1])
+            B = (x[i], y[i])
+            C = (x[i + 1], y[i + 1])
+            kappa[i] = Curvature.calc_curvature(A, B, C)
+
+        kappa[0] = kappa[1]
+        kappa[-1] = kappa[-2]
         return kappa
 
     for i in range(1, n - 1):
@@ -267,7 +280,66 @@ def add_curv_cols(df, n_cols: int=N_COLS, dist_interval: int=20):
         for band in range(N_COLS):
             out.loc[idx, f"ca{band + 1}"] = ca_bands[band]
 
-    return out
+    @staticmethod
+    def curvature_context(distance_m, kappa, window_m=100.0):
+        d = np.asarray(distance_m, dtype=float)
+        k = np.abs(np.asarray(kappa, dtype=float))
+
+        n = len(d)
+        c = k.copy()
+        cb1 = np.zeros(n, dtype=float)
+        ca1 = np.zeros(n, dtype=float)
+
+        for i in range(n):
+            left = np.searchsorted(d, d[i] - float(window_m), side="left")
+            right = np.searchsorted(d, d[i] + float(window_m), side="right")
+
+            if i > left:
+                cb1[i] = float(np.mean(k[left:i]))
+            if right > i + 1:
+                ca1[i] = float(np.mean(k[i + 1:right]))
+
+        return c, cb1, ca1
+
+    # Instead of this (below):
+    # def add_curv_cols(df, n_cols, dist_interval)
+    """
+    Rather than hard-coded curvature before 100m, curvature after 100m;
+    add curvature columns for every dist_interval metres into the file.
+    This allows for curvature before/after to be retrieved directly from the file,
+    allows dynamic testing across different interval lengths to see which performs best.
+    """
+    @staticmethod
+    def add_curvature_features(df):
+        out = df.sort_values(["track", "year", "lap_id", "distance"]).copy()
+        for col in ["c", "cb1", "ca1", "c_smooth"]:
+            if col not in out.columns:
+                out[col] = 0.0
+
+        grouped_data = out.groupby(["track", "year", "lap_id"], sort=False)
+        for (_, _, _), lap_df in grouped_data:
+            idx = lap_df.index.to_numpy()
+
+            distance = lap_df["distance"].to_numpy(dtype=float)
+
+            # Smooth x/y to reduce noise:
+            x_raw = lap_df["x"].to_numpy(dtype=float)
+            y_raw = lap_df["y"].to_numpy(dtype=float)
+            x = pd.Series(x_raw).rolling(window=7, center=True, min_periods=1).median().rolling(window=15, center=True, min_periods=1).mean().to_numpy(dtype=float)
+            y = pd.Series(y_raw).rolling(window=7, center=True, min_periods=1).median().rolling(window=15, center=True, min_periods=1).mean().to_numpy(dtype=float)
+
+            kappa = Curvature.get_curvature(x, y)
+            c, cb1, ca1 = Curvature.curvature_context(distance, kappa, window_m=100.0)
+
+            base = (0.50 * c) + (0.25 * cb1) + (0.25 * ca1)
+            c_smooth = pd.Series(base).rolling(window=11, center=True, min_periods=1).median().rolling(window=31, center=True, min_periods=1).mean().to_numpy(dtype=float)
+
+            out.loc[idx, "c"] = c
+            out.loc[idx, "cb1"] = cb1
+            out.loc[idx, "ca1"] = ca1
+            out.loc[idx, "c_smooth"] = c_smooth
+
+        return out
 
 def build_track_ground_truth(
     laps: pd.DataFrame,

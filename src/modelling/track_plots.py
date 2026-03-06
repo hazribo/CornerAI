@@ -203,3 +203,13 @@ class PlotTrackMaps:
         out_path = out_dir / f"{title_track}_{curvature_col}_over_distance.html"
         pio.write_html(fig, file=str(out_path), auto_open=False, include_plotlyjs="cdn")
         return out_path
+    
+    @staticmethod
+    def plot_predicted_speed(
+        laps: "pd.DataFrame",
+        track: str,
+        out_dir: Path,
+        lap_id: str | None = None,
+        speed_col: str = "predicted_speed",
+    ) -> Path:
+        pass
