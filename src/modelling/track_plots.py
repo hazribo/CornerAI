@@ -220,8 +220,8 @@ class PlotTrackMaps:
         if track_df.empty:
             return out_dir / f"{track_name}_car_state.html"
 
-        brake_col    = "p_brake_zone"    if "p_brake_zone"    in track_df.columns else "y_brake_zone"
-        throttle_col = "throttle"
+        brake_col = "p_brake_zone" if "p_brake_zone" in track_df.columns else "y_brake_zone"
+        throttle_col = "p_throttle_zone" if "p_throttle_zone" in track_df.columns else "y_throttle_zone"
 
         track_df["cl_bin"] = (track_df["cl_dist"] / bin_m).round().astype(int) * bin_m
         agg = (

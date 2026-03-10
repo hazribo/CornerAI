@@ -28,10 +28,9 @@ FEATURE_COLS = ["time", "distance", "x", "y", "z", "speed", "throttle", "brake",
 LABELS = {
     "brake_threshold": 0.1,
     "brake_lift_min": 0.05,
-    "throttle_lift_min": 0.1,
-    "throttle_threshold": 0.2,
+    "throttle_threshold": 0.1,
+    "throttle_lift_min": 0.05,
     "brake_window_min": 10.0,
-    "throttle_window_min": 10.0
 }
 
 def load_build_cache(
@@ -94,7 +93,6 @@ def add_labels(df: pd.DataFrame):
     brake_off = LABELS["brake_lift_min"]
     throttle_off = LABELS["throttle_lift_min"]
     brake_window_min = LABELS["brake_window_min"]
-    throttle_window_min = LABELS["throttle_window_min"]
 
     grouped_data = out.groupby(["track", "year", "lap_id"], sort=False)
 
@@ -107,31 +105,18 @@ def add_labels(df: pd.DataFrame):
 
         # calc both brake and throttle deltas:
         brake_delta = np.diff(brake, prepend=brake[0])
-        throttle_delta = np.diff(throttle, prepend=throttle[0])
 
         # get braking point and throttle zones:
         brake_start = (
             brake >= brake_on) & (
             brake_delta >= brake_off) & (
             throttle <= throttle_off
-            )
+        )
         brake_zone = np.zeros(len(lap_df), dtype=np.int32)
-        
-        # get where throttle float is "low", to register when throttle is rising:
-        low_throttle = np.r_[True, throttle[:-1] <= throttle_off]
-
-        throttle_start = (
-            throttle >= throttle_on) & (
-            throttle_delta >= throttle_off) & (
-            brake <= brake_off) & (
-            low_throttle
-            )
-        throttle_zone = np.zeros(len(lap_df), dtype=np.int32)
-
         for event_idx in np.flatnonzero(brake_start):
             brake_zone = np.maximum(brake_zone, label_window_distance(distance, event_idx, brake_window_min))
-        for event_idx in np.flatnonzero(throttle_start):
-            throttle_zone = np.maximum(throttle_zone, label_window_distance(distance, event_idx, throttle_window_min))
+
+        throttle_zone = ((throttle >= throttle_on) & (brake <= brake_off)).astype(np.int32)
 
         out.loc[idx, "y_brake_zone"] = brake_zone
         out.loc[idx, "y_throttle_zone"] = throttle_zone
