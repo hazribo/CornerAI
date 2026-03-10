@@ -201,15 +201,22 @@ class Curvature:
             n = len(distance)
 
             ca_bands = np.zeros((n_cols, n), dtype=float)
+            cb_bands = np.zeros((n_cols, n), dtype=float)
 
             for band in range(n_cols):
                 lo_m = band * dist_interval
                 hi_m = (band + 1) * dist_interval
                 for i in range(n):
-                    left  = np.searchsorted(distance, distance[i] + lo_m, side="left")
-                    right = np.searchsorted(distance, distance[i] + hi_m, side="right")
-                    if right > left:
-                        ca_bands[band, i] = float(np.mean(k[left:right]))
+                    # Curvature Ahead (ca):
+                    left_fwd  = np.searchsorted(distance, distance[i] + lo_m, side="left")
+                    right_fwd = np.searchsorted(distance, distance[i] + hi_m, side="right")
+                    if right_fwd > left_fwd:
+                        ca_bands[band, i] = float(np.mean(k[left_fwd:right_fwd]))
+                    # Curvature Behind (cb):
+                    left_bwd = np.searchsorted(distance, distance[i] - hi_m, side="left")
+                    right_bwd = np.searchsorted(distance, distance[i] - lo_m, side="right")
+                    if right_bwd > left_bwd:
+                        cb_bands[band, i] = float(np.mean(k[left_bwd:right_bwd]))
 
             weight_c    = 0.40
             weight_band = 0.60 / n_cols
@@ -226,6 +233,7 @@ class Curvature:
             out.loc[idx, "c_smooth"] = c_smooth
             for band in range(n_cols):
                 out.loc[idx, f"ca{band + 1}"] = ca_bands[band]
+                out.loc[idx, f"cb{band + 1}"] = cb_bands[band]
         return out
 
 # TODO: change top_pct once more laps have been collected.
