@@ -20,7 +20,7 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # feature columns and label details for RF model:
 N_COLS_DEFAULT = 4
-FEATURE_COLS = ["time", "distance", "x", "y", "z", "speed", "throttle", "brake", "rpm", "gear", "drs",
+FEATURE_COLS = ["distance", "x", "y", "z",
                 "c", "c_smooth", "difficulty", # curvature, curvature before 100m, curvature after 100m + smoothed curvature
                 *[f"ca{i}" for i in range(1, N_COLS_DEFAULT + 1)], 
                 ]
@@ -228,6 +228,16 @@ class Curvature:
                 out.loc[idx, f"ca{band + 1}"] = ca_bands[band]
         return out
 
+# TODO: change top_pct once more laps have been collected.
+# Very few laps currently, so top_pct = 0.2 would remove too many laps.
+def filter_fast_laps(df: pd.DataFrame, top_pct: float = 0.7) -> pd.DataFrame:
+    fast_ids = set()
+    for _, track_df in df.groupby("track"):
+        lap_times = track_df.groupby("lap_id")["laptime"].first().dropna().sort_values()
+        n_keep = max(1, int(len(lap_times) * top_pct))
+        fast_ids.update(lap_times.index[:n_keep])
+    return df[df["lap_id"].isin(fast_ids)]
+
 def build_track_ground_truth(
     laps: pd.DataFrame,
     track: str,
@@ -242,8 +252,7 @@ def build_track_ground_truth(
     if d.empty:
         return pd.DataFrame()
 
-    brake_col = "p_brake_zone" if "p_brake_zone" in d.columns else "y_brake_zone"
-    throttle_col = "p_throttle_zone" if "p_throttle_zone" in d.columns else "y_throttle_zone"
+    brake_col = "y_brake_zone"; throttle_col = "y_throttle_zone"
 
     # Project training laps to centreline for accuracy/consistency:
     projected = project_to_centreline(laps[laps["track"] == track], cl)
@@ -336,8 +345,7 @@ def add_should_brake(
 
     out["should_brake"] = (
         (out["speed"] > out["speed_exp"] + float(speed_margin)) &
-        (out["c_exp_ahead"] > out["c_exp"] + float(curv_margin)) &
-        (out["p_brake_exp"] >= float(brake_prob_min))
+        (out["p_brake_zone"] >= float(brake_prob_min))
     ).astype(int)
 
     return out
@@ -353,7 +361,7 @@ def add_should_throttle(
         out["should_throttle"] = 0
         return out
 
-    merge_cols = ["cl_dist", "p_throttle_exp"]
+    merge_cols = ["cl_dist"]
     out = pd.merge_asof(
         lap_df.sort_values("cl_dist"),
         gt[merge_cols].sort_values("cl_dist"),
@@ -361,8 +369,7 @@ def add_should_throttle(
         direction="nearest",
     )
 
-    out["should_throttle"] = (out["p_throttle_exp"] >= float(throttle_prob_min)).astype(int)
-
+    out["should_throttle"] = (out["p_throttle_zone"] >= float(throttle_prob_min)).astype(int)
     return out
 
 class RandomForestModel:
@@ -373,13 +380,13 @@ class RandomForestModel:
     @staticmethod
     def rf_model(seed: int = 19):
         return RandomForestClassifier(
-            n_estimators = 50,
-            max_depth = 12,
-            min_samples_leaf = 50,
-            min_samples_split = 100,
-            max_features = "log2",
+            n_estimators = 100,      
+            max_depth = 18,        
+            min_samples_leaf = 5,  
+            min_samples_split = 10,
+            max_features = "sqrt",   
             bootstrap = True,
-            max_samples = 0.4,
+            max_samples = 0.8,     
             n_jobs = -1,
             class_weight = "balanced_subsample",
             random_state = seed,
@@ -461,38 +468,29 @@ class RandomForestModel:
 if __name__ == "__main__":
     df = load_build_cache()
     print(f"cache loaded: rows={len(df):,} cols={df.shape[1]:,}")
-    
+    # Separate top 20% of laps for training:
+    fast_laps = filter_fast_laps(df, top_pct=0.2)
     # Generate model if doesn't already exist; otherwise, use existing model:
     model_path = MODEL_OUTPUT_DIR / "game_model.joblib"
     if not model_path.exists():
-        model = RandomForestModel.train_models(df)
+        model = RandomForestModel.train_models(fast_laps)
         path = model.save_model()
         print(f"Saved model to {path}.")
     else:
         model = RandomForestModel.load_model(model_path)
         print(f"Loaded model from {model_path}.")
 
-    # Score tracks and then get ground truths & advice:
-    scored = model.predict_probability(df)
     cl_by_track: dict[str, pd.DataFrame] = {}
     gt_by_track: dict[str, pd.DataFrame] = {}
-    annotated_laps: list[pd.DataFrame] = []
-
-    for track_name, track_df in scored.groupby("track", sort=False):
-        cl = build_centreline(scored, track=str(track_name), bin_m=5.0)
-        gt = build_track_ground_truth(scored, track=str(track_name), cl=cl, bin_m=5.0)
-        cl_by_track[str(track_name)] = cl   # ← store for player lap use
+    
+    # Notice we loop over fast_laps, NOT scored!
+    for track_name, track_df in fast_laps.groupby("track", sort=False):
+        cl = build_centreline(fast_laps, track=str(track_name), bin_m=5.0)
+        gt = build_track_ground_truth(fast_laps, track=str(track_name), cl=cl, bin_m=5.0)
+        cl_by_track[str(track_name)] = cl
         gt_by_track[str(track_name)] = gt
-        for _, lap_df in track_df.groupby("lap_id", sort=False):
-            lap_df = project_to_centreline(lap_df, cl)  # ← project first
-            lap_df = add_should_brake(lap_df, gt)
-            lap_df = add_should_throttle(lap_df, gt)
-            annotated_laps.append(lap_df)
 
-    scored = pd.concat(annotated_laps, ignore_index=True)
-
-    ##############################################################
-    # testing advice:
+    # TESTING ADVICE:
     target_track = "1 melbourne"
     target_lap_id = Path(r"Z:\CornerAI\data\processed\f1-25\laps\1 melbourne\lap_1.csv")
 
@@ -513,7 +511,6 @@ if __name__ == "__main__":
 
     track_name = target_track
 
-    # Build references from the dataset (scored), but generate advice for the player lap (lap_df)
     ref_brake = build_references_from_gt(gt, mode="brake")
     ref_throttle = build_references_from_gt(gt, mode="throttle")
     advice_df = advice(lap_df, ref_brake, ref_throttle)
@@ -522,20 +519,23 @@ if __name__ == "__main__":
     write_advice(advice_df, txt_path, track_name, lap_id="player")
     print(f"Saved advice: {txt_path}.")
     ##############################################################
-
     # Save to csv per track:
     for t, gt in gt_by_track.items():
         gt.to_csv(MODEL_OUTPUT_DIR / f"{t}_ground_truth.csv")
 
+        cl = cl_by_track[t]
+        current_track_laps = fast_laps[fast_laps["track"] == t].copy()
+        current_track_laps = project_to_centreline(current_track_laps, cl)
+
         PlotTrackMaps.plot_car_state(
-            scored,
+            current_track_laps,
             track_name=t,
             out_dir=MODEL_OUTPUT_DIR,
             brake_threshold=0.6,
             throttle_threshold=0.6,
         )
         PlotTrackMaps.plot_curvature_over_distance(
-            scored,
+            current_track_laps,
             track=t,
             out_dir=MODEL_OUTPUT_DIR,
             lap_id=None,
