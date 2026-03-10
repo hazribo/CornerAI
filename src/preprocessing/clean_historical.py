@@ -18,7 +18,8 @@ def clean(filepath):
     # Normalise speed to 0-1:
     speed = pd.to_numeric(df_raw["Speed"], errors="coerce")
     max_speed = speed.max(skipna=True)
-    df["speed"] = speed / max_speed
+    df["speed"] = speed
+    df["norm_speed"] = speed / max_speed
     # Normalise throttle, brake to 0-1:
     df["throttle"] = df_raw["Throttle"].apply(lambda x: 1.0 if x > 95 else 0.0)
     df["brake"] = df_raw["Brake"].apply(lambda x: 1.0 if x == True or x == "True" else 0.0)

@@ -40,7 +40,8 @@ def save_lap_csv(filename, car_index, lap_number, lap_time_ms, data_points):
     # Normalise speed to 0-1:
     speed = pd.to_numeric(df_raw["speed"], errors="coerce")
     max_speed = speed.max(skipna=True)
-    df["speed"] = speed / max_speed
+    df["speed"] = speed
+    df["norm_speed"] = speed / max_speed
     # Normalise throttle, brake, steering to 0-1:
     df["throttle"] = df_raw["throttle"].astype(float)
     df["brake"] = df_raw["brake"].astype(float)
