@@ -159,16 +159,6 @@ class Curvature:
         kappa[-1] = kappa[-2]
         return kappa
 
-    for i in range(1, n - 1):
-        A = (x[i - 1], y[i - 1])
-        B = (x[i], y[i])
-        C = (x[i + 1], y[i + 1])
-        kappa[i] = calc_curvature(A, B, C)
-
-    kappa[0] = kappa[1]
-    kappa[-1] = kappa[-2]
-    return kappa
-
 def calc_curvature(A, B, C):
     Ax, Ay = float(A[0]), float(A[1])
     Bx, By = float(B[0]), float(B[1])
@@ -250,7 +240,7 @@ def add_curv_cols(df, n_cols: int=N_COLS, dist_interval: int=20):
              .rolling(window=15, center=True, min_periods=1).mean()
              .to_numpy(dtype=float))
         
-        kappa = get_curvature(x, y)
+        kappa = Curvature.get_curvature(x, y)
         k = np.abs(kappa)
         n = len(distance)
 
