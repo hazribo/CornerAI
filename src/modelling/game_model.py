@@ -520,7 +520,7 @@ if __name__ == "__main__":
     txt_path = MODEL_OUTPUT_DIR / f"{track_name}_player_advice.txt"
     write_advice(advice_df, txt_path, track_name, lap_id="player")
     print(f"Saved advice: {txt_path}.")
-    ##############################################################
+        ##############################################################
     # Save to csv per track:
     for t, gt in gt_by_track.items():
         gt.to_csv(MODEL_OUTPUT_DIR / f"{t}_ground_truth.csv")
@@ -528,6 +528,7 @@ if __name__ == "__main__":
         cl = cl_by_track[t]
         current_track_laps = fast_laps[fast_laps["track"] == t].copy()
         current_track_laps = project_to_centreline(current_track_laps, cl)
+        current_track_laps = model.predict_probability(current_track_laps) 
 
         PlotTrackMaps.plot_car_state(
             current_track_laps,
