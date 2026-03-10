@@ -1,6 +1,7 @@
 from pathlib import Path
 import numpy as np
 import pandas as pd
+from scipy.signal import find_peaks
 
 def extract_events(lap, signal_col):
     # Gets a list of distances where "events" happen.
@@ -13,8 +14,8 @@ def extract_events(lap, signal_col):
         threshold = 0.5
     min_sep = 40.0
 
-    df = lap.sort_values("distance")
-    distance = df["distance"].to_numpy(dtype=float)
+    df = lap.sort_values("cl_dist")
+    distance = df["cl_dist"].to_numpy(dtype=float)
     signal = df[signal_col].to_numpy(dtype=float)
 
     if len(signal) < 2:
@@ -45,49 +46,35 @@ def nearest_event(lap: float, refs: list[float]):
     best = float(array[i])
     return best if abs(best - float(lap)) <= tolerance else None
 
-def build_references(scored_laps: pd.DataFrame, track: str, mode: str):
-    top_percent = float(0.2)
+def build_references_from_gt(gt: pd.DataFrame, mode: str, min_prob: float = 0.4) -> list[float]:
+    prob_col = "p_brake_exp" if mode == "brake" else "p_throttle_exp"
+    if prob_col not in gt.columns:
+        return []
 
-    if mode not in ["brake", "throttle"]:
-        raise ValueError(f"{mode} not 'brake' or 'throttle'.")
+    cl = gt["cl_dist"].to_numpy(dtype=float)
+    prob = gt[prob_col].to_numpy(dtype=float)
 
-    if mode == "brake":
-        prob_col = "should_brake" if "should_brake" in scored_laps.columns else "p_brake_zone"
-    else:
-        prob_col = "should_throttle" if "should_throttle" in scored_laps.columns else "p_throttle_zone"
+    # min_distance: peaks must be at least 40m apart in cl_dist space
+    bin_m = float(cl[1] - cl[0]) if len(cl) > 1 else 5.0
+    min_dist_bins = max(1, int(40.0 / bin_m))
 
-    df = scored_laps.loc[scored_laps["track"].astype(str) == str(track)].copy()
-    lap_times = (df.groupby("lap_id")["laptime"].first().sort_values())
-
-    n_keep = max(1, int(round(len(lap_times) * float(top_percent))))
-    keep_ids = set(lap_times.index[:n_keep])
-
-    event_list: list[list[float]] = []
-    df_filter = df.loc[df["lap_id"].isin(keep_ids)]
-    for _, lap_df in df_filter.groupby("lap_id", sort=False):
-        event_list.append(extract_events(lap_df, prob_col))
-    
-    max_len = max((len(ev) for ev in event_list), default=0)
-    true_events: list[float] = []
-
-    for i in range(max_len):
-        values = [event[i] for event in event_list if len(event) > i]
-        if values:
-            true_events.append(float(np.median(values)))
-
-    return true_events
+    peaks, _ = find_peaks(prob, height=min_prob, distance=min_dist_bins)
+    return [float(cl[i]) for i in peaks]
 
 def advice(lap: pd.DataFrame, ref_brake: list[float], ref_throttle: list[float]):
-    df = lap.sort_values("distance")
+    df = lap.sort_values("cl_dist")
     brake = extract_events(df, "brake")
     throttle = extract_events(df, "throttle")
 
     rows: list[dict] = []
     def add(mode: str, events: list[float], refs: list[float]):
+        used = set()
         for i, ref_d in enumerate(refs):
-            lap_d = nearest_event(ref_d, events)
+            available = [e for e in events if e not in used]
+            lap_d = nearest_event(ref_d, available)
             if lap_d is None:
                 continue
+            used.add(lap_d)
             
             delta = float(lap_d) - float(ref_d)
             
@@ -125,9 +112,9 @@ def write_advice(advice_df: pd.DataFrame, out_path: Path, track_name: str, lap_i
     if advice_df.empty:
         lines.append("No advice events found.")
     else:
-        for _, r in advice_df.iterrows():
+        for row_num, (_, r) in enumerate(advice_df.iterrows(), start=1):
             lines.append(
-                f"{r['mode']} zone {int(r['zone_index'])}: {r['advice']} "
+                f"{r['mode']} zone {row_num}: {r['advice']} "
                 f"(lap={float(r['lap_distance']):.1f}m, ref={float(r['ref_distance']):.1f}m, delta={float(r['delta']):+.1f}m)"
             )
     out_path.write_text("\n".join(lines), encoding="utf-8")

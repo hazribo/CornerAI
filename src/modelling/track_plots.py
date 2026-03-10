@@ -203,13 +203,52 @@ class PlotTrackMaps:
         out_path = out_dir / f"{title_track}_{curvature_col}_over_distance.html"
         pio.write_html(fig, file=str(out_path), auto_open=False, include_plotlyjs="cdn")
         return out_path
-    
+
     @staticmethod
-    def plot_predicted_speed(
-        laps: "pd.DataFrame",
-        track: str,
+    def plot_brake_density(
+        gt: pd.DataFrame,
+        track_name: str,
         out_dir: Path,
-        lap_id: str | None = None,
-        speed_col: str = "predicted_speed",
+        prob_col: str = "p_brake_exp",
     ) -> Path:
-        pass
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        fig = go.Figure()
+
+        # Centreline as background
+        fig.add_trace(go.Scattergl(
+            x=gt["x_exp"].to_numpy(), y=gt["y_exp"].to_numpy(),
+            mode="lines",
+            line=dict(color="rgba(0,0,0,0.2)", width=8),
+            name="Centreline",
+            hoverinfo="skip",
+        ))
+
+        # Density heatmap — color each centreline point by p_brake_exp
+        fig.add_trace(go.Scattergl(
+            x=gt["x_exp"].to_numpy(), y=gt["y_exp"].to_numpy(),
+            mode="markers",
+            name="Brake density",
+            marker=dict(
+                size=6,
+                color=gt[prob_col].to_numpy(dtype=float),
+                colorscale="RdYlGn_r",  # green=never, red=always
+                cmin=0.0, cmax=1.0,
+                showscale=True,
+                colorbar=dict(title="P(brake)"),
+            ),
+            customdata=np.c_[gt["cl_dist"].to_numpy(), gt[prob_col].to_numpy()],
+            hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>p_brake=%{customdata[1]:.3f}<extra></extra>",
+        ))
+
+        fig.update_layout(
+            title=f"{track_name} — brake density",
+            template="plotly_white",
+            xaxis_title="x", yaxis_title="y",
+        )
+        fig.update_yaxes(scaleanchor="x", scaleratio=1)
+
+        out_path = out_dir / f"{track_name}_brake_density.html"
+        pio.write_html(fig, file=str(out_path), auto_open=False, include_plotlyjs="cdn")
+        return out_path
