@@ -205,47 +205,70 @@ class PlotTrackMaps:
         return out_path
 
     @staticmethod
-    def plot_brake_density(
+    def plot_car_state(
         gt: pd.DataFrame,
         track_name: str,
         out_dir: Path,
-        prob_col: str = "p_brake_exp",
+        brake_threshold: float = 0.4,
+        throttle_threshold: float = 0.4,
     ) -> Path:
         out_dir = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
 
+        p_brake = gt["p_brake_exp"].to_numpy(dtype=float)
+        p_throttle = gt["p_throttle_exp"].to_numpy(dtype=float)
+        x = gt["x_exp"].to_numpy()
+        y = gt["y_exp"].to_numpy()
+        cl = gt["cl_dist"].to_numpy()
+
+        brake_mask    = p_brake >= brake_threshold
+        throttle_mask = (~brake_mask) & (p_throttle >= throttle_threshold)
+        corner_mask   = (~brake_mask) & (~throttle_mask)
+
         fig = go.Figure()
 
-        # Centreline as background
+        # Background centreline
         fig.add_trace(go.Scattergl(
-            x=gt["x_exp"].to_numpy(), y=gt["y_exp"].to_numpy(),
-            mode="lines",
-            line=dict(color="rgba(0,0,0,0.2)", width=8),
-            name="Centreline",
-            hoverinfo="skip",
+            x=x, y=y, mode="lines",
+            line=dict(color="rgba(0,0,0,0.15)", width=10),
+            name="Centreline", hoverinfo="skip",
         ))
 
-        # Density heatmap — color each centreline point by p_brake_exp
-        fig.add_trace(go.Scattergl(
-            x=gt["x_exp"].to_numpy(), y=gt["y_exp"].to_numpy(),
-            mode="markers",
-            name="Brake density",
-            marker=dict(
-                size=6,
-                color=gt[prob_col].to_numpy(dtype=float),
-                colorscale="RdYlGn_r",  # green=never, red=always
-                cmin=0.0, cmax=1.0,
-                showscale=True,
-                colorbar=dict(title="P(brake)"),
-            ),
-            customdata=np.c_[gt["cl_dist"].to_numpy(), gt[prob_col].to_numpy()],
-            hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>p_brake=%{customdata[1]:.3f}<extra></extra>",
-        ))
+        # Cornering (grey)
+        if corner_mask.any():
+            fig.add_trace(go.Scattergl(
+                x=x[corner_mask], y=y[corner_mask], mode="markers",
+                name="Cornering",
+                marker=dict(size=5, color="rgba(160,160,160,0.7)"),
+                customdata=np.c_[cl[corner_mask], p_brake[corner_mask], p_throttle[corner_mask]],
+                hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>p_brake=%{customdata[1]:.3f}<br>p_throttle=%{customdata[2]:.3f}<extra></extra>",
+            ))
+
+        # Throttle (green)
+        if throttle_mask.any():
+            fig.add_trace(go.Scattergl(
+                x=x[throttle_mask], y=y[throttle_mask], mode="markers",
+                name="Throttle zone",
+                marker=dict(size=6, color="rgba(34,180,34,0.9)"),
+                customdata=np.c_[cl[throttle_mask], p_throttle[throttle_mask]],
+                hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>p_throttle=%{customdata[1]:.3f}<extra></extra>",
+            ))
+
+        # Brake (red) — plotted last so it renders on top
+        if brake_mask.any():
+            fig.add_trace(go.Scattergl(
+                x=x[brake_mask], y=y[brake_mask], mode="markers",
+                name="Brake zone",
+                marker=dict(size=7, color="rgba(220,20,20,0.95)"),
+                customdata=np.c_[cl[brake_mask], p_brake[brake_mask]],
+                hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>p_brake=%{customdata[1]:.3f}<extra></extra>",
+            ))
 
         fig.update_layout(
-            title=f"{track_name} — brake density",
+            title=f"{track_name} — braking / throttle zones",
             template="plotly_white",
             xaxis_title="x", yaxis_title="y",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
         )
         fig.update_yaxes(scaleanchor="x", scaleratio=1)
 

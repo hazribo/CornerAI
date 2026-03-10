@@ -628,10 +628,11 @@ if __name__ == "__main__":
     for t, gt in gt_by_track.items():
         gt.to_csv(MODEL_OUTPUT_DIR / f"{t}_ground_truth.csv")
 
-    plot_paths = PlotTrackMaps.plot_brake_density(
+    plot_paths = PlotTrackMaps.plot_car_state(
         scored,
         out_dir=MODEL_OUTPUT_DIR,
-        prob_threshold=0.7,
+        brake_threshold=0.7,
+        throttle_threshold=0.5,
         zone_col="p_brake_zone",
     )
     track_name = str(scored["track"].astype(str).iloc[0])
