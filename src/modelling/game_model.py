@@ -30,7 +30,7 @@ LABELS = {
     "brake_lift_min": 0.05,
     "throttle_threshold": 0.1,
     "throttle_lift_min": 0.05,
-    "brake_window_min": 10.0,
+    "brake_window_min": 5.0, # buffer to brake zone
 }
 
 def load_build_cache(

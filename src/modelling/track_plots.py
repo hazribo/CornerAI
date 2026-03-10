@@ -292,28 +292,36 @@ class PlotTrackMaps:
         if track_df.empty:
             return out_dir / f"{track_name}_car_state.html"
 
-        brake_col = "p_brake_zone" if "p_brake_zone" in track_df.columns else "y_brake_zone"
-        throttle_col = "p_throttle_zone" if "p_throttle_zone" in track_df.columns else "y_throttle_zone"
+        brake_col = "brake" if "brake" in track_df.columns else "y_brake_zone"
+        throttle_col = "throttle" if "throttle" in track_df.columns else "y_throttle_zone"
+        
+        p_brake_col = "p_brake_zone" if "p_brake_zone" in track_df.columns else brake_col
+        p_throttle_col = "p_throttle_zone" if "p_throttle_zone" in track_df.columns else throttle_col
 
         track_df["cl_bin"] = (track_df["cl_dist"] / bin_m).round().astype(int) * bin_m
         agg = (
             track_df.groupby("cl_bin", as_index=False)
             .agg(x=("x", "mean"), y=("y", "mean"),
-                p_brake=(brake_col, "mean"),
-                p_throttle=(throttle_col, "mean"),
+                brake=(brake_col, "mean"),
+                throttle=(throttle_col, "mean"),
+                p_brake=(p_brake_col, "mean"),
+                p_throttle=(p_throttle_col, "mean"),
                 cl_dist=("cl_dist", "mean"))
             .sort_values("cl_bin")
             .reset_index(drop=True)
         )
 
-        p_brake    = agg["p_brake"].to_numpy(dtype=float)
-        p_throttle = agg["p_throttle"].to_numpy(dtype=float)
+        brake_val    = agg["brake"].to_numpy(dtype=float)
+        throttle_val = agg["throttle"].to_numpy(dtype=float)
+        p_brake      = agg["p_brake"].to_numpy(dtype=float)
+        p_throttle   = agg["p_throttle"].to_numpy(dtype=float)
         x  = agg["x"].to_numpy()
         y  = agg["y"].to_numpy()
         cl = agg["cl_dist"].to_numpy()
 
-        brake_mask    = p_brake >= brake_threshold
-        throttle_mask = (~brake_mask) & (p_throttle >= throttle_threshold)
+        # Use the physical inputs to decide the map nodes
+        brake_mask    = brake_val >= brake_threshold
+        throttle_mask = (~brake_mask) & (throttle_val >= throttle_threshold)
         corner_mask   = (~brake_mask) & (~throttle_mask)
 
         fig = go.Figure()
@@ -327,24 +335,24 @@ class PlotTrackMaps:
                 x=x[corner_mask], y=y[corner_mask], mode="markers",
                 name="Cornering",
                 marker=dict(size=5, color="rgba(160,160,160,0.7)"),
-                customdata=np.c_[cl[corner_mask], p_brake[corner_mask], p_throttle[corner_mask]],
-                hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>p_brake=%{customdata[1]:.3f}<br>p_throttle=%{customdata[2]:.3f}<extra></extra>",
+                customdata=np.c_[cl[corner_mask], brake_val[corner_mask], throttle_val[corner_mask], p_brake[corner_mask], p_throttle[corner_mask]],
+                hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>brake=%{customdata[1]:.3f} (p=%{customdata[3]:.3f})<br>throttle=%{customdata[2]:.3f} (p=%{customdata[4]:.3f})<extra></extra>",
             ))
         if throttle_mask.any():
             fig.add_trace(go.Scattergl(
                 x=x[throttle_mask], y=y[throttle_mask], mode="markers",
                 name="Throttle zone",
                 marker=dict(size=6, color="rgba(34,180,34,0.9)"),
-                customdata=np.c_[cl[throttle_mask], p_throttle[throttle_mask]],
-                hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>p_throttle=%{customdata[1]:.3f}<extra></extra>",
+                customdata=np.c_[cl[throttle_mask], throttle_val[throttle_mask], p_throttle[throttle_mask]],
+                hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>throttle=%{customdata[1]:.3f} (p=%{customdata[2]:.3f})<extra></extra>",
             ))
         if brake_mask.any():
             fig.add_trace(go.Scattergl(
                 x=x[brake_mask], y=y[brake_mask], mode="markers",
                 name="Brake zone",
                 marker=dict(size=7, color="rgba(220,20,20,0.95)"),
-                customdata=np.c_[cl[brake_mask], p_brake[brake_mask]],
-                hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>p_brake=%{customdata[1]:.3f}<extra></extra>",
+                customdata=np.c_[cl[brake_mask], brake_val[brake_mask], p_brake[brake_mask]],
+                hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>brake=%{customdata[1]:.3f} (p=%{customdata[2]:.3f})<extra></extra>",
             ))
 
         fig.update_layout(
