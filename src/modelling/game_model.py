@@ -19,10 +19,10 @@ CACHE_DIR = Path(__file__).resolve().parents[2] / "data" / "cache" / "f1-25"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # feature columns and label details for RF model:
-N_COLS = 4 # ca1 = 20m ahead, ca2 = 40m ahead, etc...
+N_COLS_DEFAULT = 4
 FEATURE_COLS = ["time", "distance", "x", "y", "z", "speed", "throttle", "brake", "rpm", "gear", "drs",
                 "c", "c_smooth", "difficulty", # curvature, curvature before 100m, curvature after 100m + smoothed curvature
-                *[f"ca{i}" for i in range(1, N_COLS + 1)], 
+                *[f"ca{i}" for i in range(1, N_COLS_DEFAULT + 1)], 
                 ]
 
 LABELS = {
@@ -44,7 +44,7 @@ def load_build_cache(
         return pd.read_pickle(cache_path)
 
     df = load_game_laps()
-    df = add_curv_cols(df, N_COLS, 50)
+    df = Curvature.add_curv_cols(df, n_cols=N_COLS_DEFAULT, dist_interval=50)
     df = add_labels(df)
 
     df.to_pickle(cache_path)
@@ -159,119 +159,32 @@ class Curvature:
         kappa[-1] = kappa[-2]
         return kappa
 
-def calc_curvature(A, B, C):
-    Ax, Ay = float(A[0]), float(A[1])
-    Bx, By = float(B[0]), float(B[1])
-    Cx, Cy = float(C[0]), float(C[1])
+    def calc_curvature(A, B, C):
+        Ax, Ay = float(A[0]), float(A[1])
+        Bx, By = float(B[0]), float(B[1])
+        Cx, Cy = float(C[0]), float(C[1])
 
-    if not (np.isfinite(Ax) and np.isfinite(Ay) and np.isfinite(Bx) and np.isfinite(By) and np.isfinite(Cx) and np.isfinite(Cy)):
-        return 0.0
+        if not (np.isfinite(Ax) and np.isfinite(Ay) and np.isfinite(Bx) and np.isfinite(By) and np.isfinite(Cx) and np.isfinite(Cy)):
+            return 0.0
 
-    v1 = np.array([Bx - Ax, By - Ay], dtype=float)
-    v2 = np.array([Cx - Bx, Cy - By], dtype=float)
+        v1 = np.array([Bx - Ax, By - Ay], dtype=float)
+        v2 = np.array([Cx - Bx, Cy - By], dtype=float)
 
-    n1 = float(np.linalg.norm(v1))
-    n2 = float(np.linalg.norm(v2))
-    ds = (n1 + n2) / 2.0
-    if not np.isfinite(ds) or ds <= 1e-9:
-        return 0.0
+        n1 = float(np.linalg.norm(v1))
+        n2 = float(np.linalg.norm(v2))
+        ds = (n1 + n2) / 2.0
+        if not np.isfinite(ds) or ds <= 1e-9:
+            return 0.0
 
-    angle1 = float(np.arctan2(v1[1], v1[0]))
-    angle2 = float(np.arctan2(v2[1], v2[0]))
+        angle1 = float(np.arctan2(v1[1], v1[0]))
+        angle2 = float(np.arctan2(v2[1], v2[0]))
 
-    d_theta = (angle2 - angle1 + np.pi) % (2 * np.pi) - np.pi
-    if not np.isfinite(d_theta):
-        return 0.0
+        d_theta = (angle2 - angle1 + np.pi) % (2 * np.pi) - np.pi
+        if not np.isfinite(d_theta):
+            return 0.0
 
-    return float(d_theta / ds)
+        return float(d_theta / ds)
 
-def curvature_context(distance_m, kappa, window_m=100.0):
-    d = np.asarray(distance_m, dtype=float)
-    k = np.abs(np.asarray(kappa, dtype=float))
-
-    n = len(d)
-    c = k.copy()
-    cb1 = np.zeros(n, dtype=float)
-    ca1 = np.zeros(n, dtype=float)
-
-    for i in range(n):
-        left = np.searchsorted(d, d[i] - float(window_m), side="left")
-        right = np.searchsorted(d, d[i] + float(window_m), side="right")
-
-        if i > left:
-            cb1[i] = float(np.mean(k[left:i]))
-        if right > i + 1:
-            ca1[i] = float(np.mean(k[i + 1:right]))
-
-    return c, cb1, ca1
-
-# Instead of this (below):
-# def add_curv_cols(df, n_cols, dist_interval)
-"""
-Rather than hard-coded curvature before 100m, curvature after 100m;
-add curvature columns for every dist_interval metres into the file.
-This allows for curvature before/after to be retrieved directly from the file,
-allows dynamic testing across different interval lengths to see which performs best.
-"""
-
-def add_curv_cols(df, n_cols: int=N_COLS, dist_interval: int=20):
-    out = df.sort_values(["track", "year", "lap_id", "distance"]).copy()
-
-    base_cols = ["c", "c_smooth"]
-    band_cols = [f"cb{i}" for i in range(1, n_cols + 1)] + [f"ca{i}" for i in range(1, n_cols + 1)]
-    for col in base_cols + band_cols:
-        if col not in out.columns:
-            out[col] = 0.0
-
-    grouped_data = out.groupby(["track", "year", "lap_id"], sort=False)
-    for (_, _, _), lap_df in grouped_data:
-        idx = lap_df.index.to_numpy()
-        distance = lap_df["distance"].to_numpy(dtype=float)
-
-        # Smooth x/y to reduce noise:
-        x_raw = lap_df["x"].to_numpy(dtype=float)
-        y_raw = lap_df["y"].to_numpy(dtype=float)
-        x = (pd.Series(x_raw)
-             .rolling(window=7, center=True, min_periods=1).median()
-             .rolling(window=15, center=True, min_periods=1).mean()
-             .to_numpy(dtype=float))
-        y = (pd.Series(y_raw)
-             .rolling(window=7, center=True, min_periods=1).median()
-             .rolling(window=15, center=True, min_periods=1).mean()
-             .to_numpy(dtype=float))
-        
-        kappa = Curvature.get_curvature(x, y)
-        k = np.abs(kappa)
-        n = len(distance)
-
-        ca_bands = np.zeros((n_cols, n), dtype=float)
-
-        for band in range(n_cols):
-            lo_m = band * dist_interval
-            hi_m = (band + 1) * dist_interval
-            for i in range(n):
-                left  = np.searchsorted(distance, distance[i] + lo_m, side="left")
-                right = np.searchsorted(distance, distance[i] + hi_m, side="right")
-                if right > left:
-                    ca_bands[band, i] = float(np.mean(k[left:right]))
-
-        weight_c    = 0.40
-        weight_band = 0.60 / N_COLS
-        base = weight_c * k
-        for band in range(N_COLS):
-            base += weight_band * ca_bands[band]
-
-        c_smooth = (pd.Series(base)
-                    .rolling(window=11, center=True, min_periods=1).median()
-                    .rolling(window=31, center=True, min_periods=1).mean()
-                    .to_numpy(dtype=float))
-
-        out.loc[idx, "c"] = k
-        out.loc[idx, "c_smooth"] = c_smooth
-        for band in range(N_COLS):
-            out.loc[idx, f"ca{band + 1}"] = ca_bands[band]
-
-    @staticmethod
     def curvature_context(distance_m, kappa, window_m=100.0):
         d = np.asarray(distance_m, dtype=float)
         k = np.abs(np.asarray(kappa, dtype=float))
@@ -300,6 +213,65 @@ def add_curv_cols(df, n_cols: int=N_COLS, dist_interval: int=20):
     This allows for curvature before/after to be retrieved directly from the file,
     allows dynamic testing across different interval lengths to see which performs best.
     """
+
+    def add_curv_cols(df, n_cols: int=4, dist_interval: int=20):
+        out = df.sort_values(["track", "year", "lap_id", "distance"]).copy()
+
+        base_cols = ["c", "c_smooth"]
+        band_cols = [f"cb{i}" for i in range(1, n_cols + 1)] + [f"ca{i}" for i in range(1, n_cols + 1)]
+        for col in base_cols + band_cols:
+            if col not in out.columns:
+                out[col] = 0.0
+
+        grouped_data = out.groupby(["track", "year", "lap_id"], sort=False)
+        for (_, _, _), lap_df in grouped_data:
+            idx = lap_df.index.to_numpy()
+            distance = lap_df["distance"].to_numpy(dtype=float)
+
+            # Smooth x/y to reduce noise:
+            x_raw = lap_df["x"].to_numpy(dtype=float)
+            y_raw = lap_df["y"].to_numpy(dtype=float)
+            x = (pd.Series(x_raw)
+                .rolling(window=7, center=True, min_periods=1).median()
+                .rolling(window=15, center=True, min_periods=1).mean()
+                .to_numpy(dtype=float))
+            y = (pd.Series(y_raw)
+                .rolling(window=7, center=True, min_periods=1).median()
+                .rolling(window=15, center=True, min_periods=1).mean()
+                .to_numpy(dtype=float))
+            
+            kappa = Curvature.get_curvature(x, y)
+            k = np.abs(kappa)
+            n = len(distance)
+
+            ca_bands = np.zeros((n_cols, n), dtype=float)
+
+            for band in range(n_cols):
+                lo_m = band * dist_interval
+                hi_m = (band + 1) * dist_interval
+                for i in range(n):
+                    left  = np.searchsorted(distance, distance[i] + lo_m, side="left")
+                    right = np.searchsorted(distance, distance[i] + hi_m, side="right")
+                    if right > left:
+                        ca_bands[band, i] = float(np.mean(k[left:right]))
+
+            weight_c    = 0.40
+            weight_band = 0.60 / n_cols
+            base = weight_c * k
+            for band in range(n_cols):
+                base += weight_band * ca_bands[band]
+
+            c_smooth = (pd.Series(base)
+                        .rolling(window=11, center=True, min_periods=1).median()
+                        .rolling(window=31, center=True, min_periods=1).mean()
+                        .to_numpy(dtype=float))
+
+            out.loc[idx, "c"] = k
+            out.loc[idx, "c_smooth"] = c_smooth
+            for band in range(n_cols):
+                out.loc[idx, f"ca{band + 1}"] = ca_bands[band]
+            return out
+
     @staticmethod
     def add_curvature_features(df):
         out = df.sort_values(["track", "year", "lap_id", "distance"]).copy()
@@ -602,8 +574,12 @@ if __name__ == "__main__":
     target_lap_id = Path(r"Z:\CornerAI\data\processed\f1-25\laps\1 melbourne\lap_1.csv")
 
     player_lap = pd.read_csv(target_lap_id)
+    player_lap["track"] = target_track
+    player_lap["year"] = 0
+    player_lap["lap_id"] = "player"
+    player_lap["difficulty"] = 0
 
-    player_lap = add_curv_cols(player_lap, N_COLS, 50)
+    player_lap = Curvature.add_curv_cols(player_lap, n_cols=N_COLS_DEFAULT, dist_interval=50)
     player_lap = model.predict_probability(player_lap)
 
     cl = cl_by_track.get(target_track)        
@@ -628,10 +604,11 @@ if __name__ == "__main__":
     for t, gt in gt_by_track.items():
         gt.to_csv(MODEL_OUTPUT_DIR / f"{t}_ground_truth.csv")
 
-    plot_paths = PlotTrackMaps.plot_brake_density(
+    plot_paths = PlotTrackMaps.plot_car_state(
         scored,
         out_dir=MODEL_OUTPUT_DIR,
-        prob_threshold=0.7,
+        brake_threshold=0.7,
+        throttle_threshold=0.5,
         zone_col="p_brake_zone",
     )
     track_name = str(scored["track"].astype(str).iloc[0])
