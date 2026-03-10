@@ -5,11 +5,12 @@ import time
 import re
 # other file imports:
 from track_plots import PlotTrackMaps
-from game_advice import build_references, advice, write_advice
+from game_advice import build_references_from_gt, advice, write_advice
 # model imports:
 from sklearn.model_selection import GroupShuffleSplit
 from sklearn.ensemble import RandomForestClassifier
 import joblib
+from scipy.spatial import cKDTree # For nearest-neighbour; centreline
 
 F125_PROCESSED_DIR = Path(__file__).resolve().parents[2] / "data" / "processed" / "f1-25" / "laps"
 MODEL_OUTPUT_DIR = Path(__file__).resolve().parents[2] / "data" / "models" / "f1-25"
@@ -231,6 +232,7 @@ def add_curvature_features(df):
 def build_track_ground_truth(
     laps: pd.DataFrame,
     track: str,
+    cl: pd.DataFrame,
     bin_m: float = 5.0,
 ) -> pd.DataFrame:
     """
@@ -243,12 +245,15 @@ def build_track_ground_truth(
 
     brake_col = "p_brake_zone" if "p_brake_zone" in d.columns else "y_brake_zone"
     throttle_col = "p_throttle_zone" if "p_throttle_zone" in d.columns else "y_throttle_zone"
-    d["dist_bin"] = (d["distance"].astype(float) / float(bin_m)).round().astype(int) * float(bin_m)
+
+    # Project training laps to centreline for accuracy/consistency:
+    projected = project_to_centreline(laps[laps["track"] == track], cl)
+    projected["cl_bin"] = (projected["cl_dist"] / bin_m).round().astype(int) * bin_m
 
     gt = (
-        d.groupby("dist_bin", as_index=False)
+        projected.groupby("cl_bin", as_index=False)
          .agg(
-             distance=("dist_bin", "first"),
+             cl_dist=("cl_bin", "first"),
              x_exp=("x", "mean"),
              y_exp=("y", "mean"),
              c_exp=("c_smooth", "mean"),
@@ -256,11 +261,59 @@ def build_track_ground_truth(
              p_brake_exp=(brake_col, "mean"),
              p_throttle_exp=(throttle_col, "mean"),
          )
-         .sort_values("distance")
+         .sort_values("cl_dist")
          .reset_index(drop=True)
     )
     gt["c_exp_ahead"] = gt["c_exp"].shift(-3).fillna(gt["c_exp"])
     return gt
+
+def build_centreline(laps: pd.DataFrame, track: str, bin_m: float = 5.0) -> pd.DataFrame:
+    """
+    Produces a canonical centreline for the track: evenly-spaced x/y points
+    with their cumulative arc-length as 'cl_dist'.
+    """
+    d = laps.loc[laps["track"].astype(str) == str(track)].copy()
+    if d.empty:
+        return pd.DataFrame()
+
+    d["dist_bin"] = (d["distance"].astype(float) / bin_m).round().astype(int) * bin_m
+    cl = (
+        d.groupby("dist_bin", as_index=False)
+         .agg(x=("x", "mean"), y=("y", "mean"))
+         .sort_values("dist_bin")
+         .reset_index(drop=True)
+    )
+    cl["x"] = cl["x"].rolling(window=11, center=True, min_periods=1).mean()
+    cl["y"] = cl["y"].rolling(window=11, center=True, min_periods=1).mean()
+
+    dx = cl["x"].diff().fillna(0.0)
+    dy = cl["y"].diff().fillna(0.0)
+    cl["cl_dist"] = np.sqrt(dx**2 + dy**2).cumsum()
+    return cl
+
+def project_to_centreline(lap_df: pd.DataFrame, cl: pd.DataFrame) -> pd.DataFrame:
+    cl_xy = cl[["x", "y"]].to_numpy()
+    tree = cKDTree(cl_xy)
+
+    lap_xy = lap_df[["x", "y"]].to_numpy()
+    _, idx = tree.query(lap_xy)
+
+    cl_d = cl["cl_dist"].to_numpy()
+    cl_x = cl["x"].to_numpy()
+    cl_y = cl["y"].to_numpy()
+
+    proj_d = cl_d[idx]
+
+    fwd_j = np.clip(idx + 1, 0, len(cl_x) - 1)
+    bwd_j = np.clip(idx - 1, 0, len(cl_x) - 1)
+    fwd = np.stack([cl_x[fwd_j] - cl_x[bwd_j], cl_y[fwd_j] - cl_y[bwd_j]], axis=1).astype(float)
+    off = lap_xy - cl_xy[idx]
+    lateral = (fwd[:, 0] * off[:, 1] - fwd[:, 1] * off[:, 0]) / (np.linalg.norm(fwd, axis=1) + 1e-9)
+
+    out = lap_df.copy()
+    out["cl_dist"] = proj_d
+    out["lateral_err"] = lateral
+    return out
 
 def add_should_brake(
     lap_df: pd.DataFrame,
@@ -276,9 +329,9 @@ def add_should_brake(
         return out
 
     out = pd.merge_asof(
-        lap_df.sort_values("distance"),
-        gt[["distance", "x_exp", "y_exp", "c_exp", "c_exp_ahead", "speed_exp", "p_brake_exp"]].sort_values("distance"),
-        on="distance",
+        lap_df.sort_values("cl_dist"),
+        gt[["cl_dist", "x_exp", "y_exp", "c_exp", "c_exp_ahead", "speed_exp", "p_brake_exp"]].sort_values("cl_dist"),
+        on="cl_dist",   # Use centreline distance instead of just distance
         direction="nearest",
     )
 
@@ -302,11 +355,11 @@ def add_should_throttle(
         out["should_throttle"] = 0
         return out
 
-    merge_cols = ["distance", "p_throttle_exp"]
+    merge_cols = ["cl_dist", "p_throttle_exp"]
     out = pd.merge_asof(
-        lap_df.sort_values("distance"),
-        gt[merge_cols].sort_values("distance"),
-        on="distance",
+        lap_df.sort_values("cl_dist"),
+        gt[merge_cols].sort_values("cl_dist"),
+        on="cl_dist",
         direction="nearest",
     )
 
@@ -423,13 +476,17 @@ if __name__ == "__main__":
 
     # Score tracks and then get ground truths & advice:
     scored = model.predict_probability(df)
+    cl_by_track: dict[str, pd.DataFrame] = {}
     gt_by_track: dict[str, pd.DataFrame] = {}
     annotated_laps: list[pd.DataFrame] = []
 
     for track_name, track_df in scored.groupby("track", sort=False):
-        gt = build_track_ground_truth(scored, track=str(track_name), bin_m=5.0)
+        cl = build_centreline(scored, track=str(track_name), bin_m=5.0)
+        gt = build_track_ground_truth(scored, track=str(track_name), cl=cl, bin_m=5.0)
+        cl_by_track[str(track_name)] = cl   # ← store for player lap use
         gt_by_track[str(track_name)] = gt
         for _, lap_df in track_df.groupby("lap_id", sort=False):
+            lap_df = project_to_centreline(lap_df, cl)  # ← project first
             lap_df = add_should_brake(lap_df, gt)
             lap_df = add_should_throttle(lap_df, gt)
             annotated_laps.append(lap_df)
@@ -442,18 +499,23 @@ if __name__ == "__main__":
     target_lap_id = Path(r"Z:\CornerAI\data\processed\f1-25\laps\1 melbourne\lap_1.csv")
 
     player_lap = pd.read_csv(target_lap_id)
-
+    # Add placeholder columns for new lap:
+    player_lap["track"] = target_track; player_lap["year"] = 0; player_lap["lap_id"] = "player"; player_lap["difficulty"] = 0 
+    # Add curvature columns for new lap; predict probabilities for lap:
     player_lap = add_curvature_features(player_lap)
     player_lap = model.predict_probability(player_lap)
+
+    cl = cl_by_track.get(target_track)        
+    player_lap = project_to_centreline(player_lap, cl)  
     gt = gt_by_track.get(target_track, pd.DataFrame())
     lap_df = add_should_brake(player_lap, gt)
-    lap_df = add_should_throttle(lap_df, gt).sort_values("distance")
+    lap_df = add_should_throttle(lap_df, gt).sort_values("cl_dist")  
 
     track_name = target_track
 
     # Build references from the dataset (scored), but generate advice for the player lap (lap_df)
-    ref_brake = build_references(scored, track=track_name, mode="brake")
-    ref_throttle = build_references(scored, track=track_name, mode="throttle")
+    ref_brake = build_references_from_gt(gt, mode="brake")
+    ref_throttle = build_references_from_gt(gt, mode="throttle")
     advice_df = advice(lap_df, ref_brake, ref_throttle)
 
     txt_path = MODEL_OUTPUT_DIR / f"{track_name}_player_advice.txt"
@@ -465,7 +527,7 @@ if __name__ == "__main__":
     for t, gt in gt_by_track.items():
         gt.to_csv(MODEL_OUTPUT_DIR / f"{t}_ground_truth.csv")
 
-    plot_paths = PlotTrackMaps.plot_braking_zones_by_track(
+    plot_paths = PlotTrackMaps.plot_brake_density(
         scored,
         out_dir=MODEL_OUTPUT_DIR,
         prob_threshold=0.7,
