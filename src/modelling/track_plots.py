@@ -203,6 +203,78 @@ class PlotTrackMaps:
         out_path = out_dir / f"{title_track}_{curvature_col}_over_distance.html"
         pio.write_html(fig, file=str(out_path), auto_open=False, include_plotlyjs="cdn")
         return out_path
+    
+    @staticmethod
+    def plot_predicted_speed(
+        laps: pd.DataFrame,
+        track_name: str,
+        out_dir: Path,
+        lap_id: str | None = None,
+        speed_col: str = "predicted_speed",
+    ) -> Path:
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        df = laps.copy()
+        if track_name is not None:
+            df = df.loc[df["track"].astype(str) == str(track_name)]
+        if df.empty:
+            raise ValueError(f"No rows found when filtered by track='{track_name}'")
+        
+        if lap_id is None:
+            lap_id = str(df["lap_id"].astype(str).iloc[0])
+            
+        df = df.loc[df["lap_id"].astype(str) == str(lap_id)].sort_values("distance")
+        if df.empty:
+            raise ValueError(f"No rows found when filtered by lap_id='{lap_id}'")
+            
+        if speed_col not in df.columns:
+            if "speed" in df.columns:
+                speed_col = "speed"
+            else:
+                raise ValueError(f"No speed column")
+
+        fig = go.Figure()
+
+        PlotTrackMaps._add_track_line(fig, df, lap_id=lap_id)
+        fig.add_trace(
+            go.Scattergl(
+                x=df["x"].to_numpy(),
+                y=df["y"].to_numpy(),
+                mode="markers",
+                name=f"Speed ({speed_col})",
+                marker=dict(
+                    size=4,
+                    color=df[speed_col].to_numpy(dtype=float),
+                    colorscale="Turbo",  # Blue/Green for slow, Red for fast
+                    showscale=True,
+                    colorbar=dict(title=f"{speed_col} (km/h)"),
+                    opacity=0.9,
+                ),
+                customdata=np.c_[
+                    df["distance"].to_numpy(dtype=float),
+                    df[speed_col].to_numpy(dtype=float)
+                ],
+                hovertemplate=(
+                    "dist: %{customdata[0]:.1f}m<br>"
+                    "speed: %{customdata[1]:.2f} km/h"
+                    "<extra></extra>"
+                ),
+            )
+        )
+
+        fig.update_layout(
+            title=f"{track_name} — {speed_col} Track Map (lap_id={lap_id})",
+            template="plotly_white",
+            xaxis_title="x",
+            yaxis_title="y",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        )
+        fig.update_yaxes(scaleanchor="x", scaleratio=1)
+
+        out_path = out_dir / f"{track_name}_predicted_speed_map.html"
+        pio.write_html(fig, file=str(out_path), auto_open=False, include_plotlyjs="cdn")
+        return out_path
 
     @staticmethod
     def plot_car_state(
