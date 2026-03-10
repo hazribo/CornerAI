@@ -265,6 +265,7 @@ def build_track_ground_truth(
              x_exp=("x", "mean"),
              y_exp=("y", "mean"),
              c_exp=("c_smooth", "mean"),
+             norm_speed_exp=("norm_speed", "mean"),
              speed_exp=("speed", "mean"),
              p_brake_exp=(brake_col, "mean"),
              p_throttle_exp=(throttle_col, "mean"),
@@ -329,7 +330,6 @@ def add_should_brake(
     lap_df: pd.DataFrame,
     gt: pd.DataFrame,
     speed_margin: float = 0.03,
-    curv_margin: float = 0.0002,
     brake_prob_min: float = 0.5,
 ) -> pd.DataFrame:
     
@@ -340,13 +340,13 @@ def add_should_brake(
 
     out = pd.merge_asof(
         lap_df.sort_values("cl_dist"),
-        gt[["cl_dist", "x_exp", "y_exp", "c_exp", "c_exp_ahead", "speed_exp", "p_brake_exp"]].sort_values("cl_dist"),
+        gt[["cl_dist", "x_exp", "y_exp", "c_exp", "c_exp_ahead", "norm_speed_exp", "speed_exp", "p_brake_exp"]].sort_values("cl_dist"),
         on="cl_dist",   # Use centreline distance instead of just distance
         direction="nearest",
     )
 
     out["should_brake"] = (
-        (out["speed"] > out["speed_exp"] + float(speed_margin)) &
+        (out["norm_speed"] > out["norm_speed_exp"] + float(speed_margin)) &
         (out["p_brake_zone"] >= float(brake_prob_min))
     ).astype(int)
 
