@@ -268,6 +268,8 @@ def build_track_ground_truth(
              speed_exp=("speed", "mean"),
              p_brake_exp=(brake_col, "mean"),
              p_throttle_exp=(throttle_col, "mean"),
+             brake_exp=("brake", "mean"),      
+             throttle_exp=("throttle", "mean"),
          )
          .sort_values("cl_dist")
          .reset_index(drop=True)
