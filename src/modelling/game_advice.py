@@ -6,12 +6,7 @@ from scipy.signal import find_peaks
 def extract_events(lap, signal_col):
     # Gets a list of distances where "events" happen.
     # i.e.: upwards threshold crossing of signal_col (spaced by min separation)
-    if signal_col == "brake":
-        threshold = 0.1
-    elif signal_col == "throttle":
-        threshold = 0.1
-    else:
-        threshold = 0.5
+    threshold = 0.6
     min_sep = 40.0
 
     df = lap.sort_values("cl_dist")

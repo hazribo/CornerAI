@@ -185,35 +185,6 @@ class Curvature:
 
         return float(d_theta / ds)
 
-    def curvature_context(distance_m, kappa, window_m=100.0):
-        d = np.asarray(distance_m, dtype=float)
-        k = np.abs(np.asarray(kappa, dtype=float))
-
-        n = len(d)
-        c = k.copy()
-        cb1 = np.zeros(n, dtype=float)
-        ca1 = np.zeros(n, dtype=float)
-
-        for i in range(n):
-            left = np.searchsorted(d, d[i] - float(window_m), side="left")
-            right = np.searchsorted(d, d[i] + float(window_m), side="right")
-
-            if i > left:
-                cb1[i] = float(np.mean(k[left:i]))
-            if right > i + 1:
-                ca1[i] = float(np.mean(k[i + 1:right]))
-
-        return c, cb1, ca1
-
-    # Instead of this (below):
-    # def add_curv_cols(df, n_cols, dist_interval)
-    """
-    Rather than hard-coded curvature before 100m, curvature after 100m;
-    add curvature columns for every dist_interval metres into the file.
-    This allows for curvature before/after to be retrieved directly from the file,
-    allows dynamic testing across different interval lengths to see which performs best.
-    """
-
     def add_curv_cols(df, n_cols: int=4, dist_interval: int=20):
         out = df.sort_values(["track", "year", "lap_id", "distance"]).copy()
 
@@ -270,38 +241,6 @@ class Curvature:
             out.loc[idx, "c_smooth"] = c_smooth
             for band in range(n_cols):
                 out.loc[idx, f"ca{band + 1}"] = ca_bands[band]
-            return out
-
-    @staticmethod
-    def add_curvature_features(df):
-        out = df.sort_values(["track", "year", "lap_id", "distance"]).copy()
-        for col in ["c", "cb1", "ca1", "c_smooth"]:
-            if col not in out.columns:
-                out[col] = 0.0
-
-        grouped_data = out.groupby(["track", "year", "lap_id"], sort=False)
-        for (_, _, _), lap_df in grouped_data:
-            idx = lap_df.index.to_numpy()
-
-            distance = lap_df["distance"].to_numpy(dtype=float)
-
-            # Smooth x/y to reduce noise:
-            x_raw = lap_df["x"].to_numpy(dtype=float)
-            y_raw = lap_df["y"].to_numpy(dtype=float)
-            x = pd.Series(x_raw).rolling(window=7, center=True, min_periods=1).median().rolling(window=15, center=True, min_periods=1).mean().to_numpy(dtype=float)
-            y = pd.Series(y_raw).rolling(window=7, center=True, min_periods=1).median().rolling(window=15, center=True, min_periods=1).mean().to_numpy(dtype=float)
-
-            kappa = Curvature.get_curvature(x, y)
-            c, cb1, ca1 = Curvature.curvature_context(distance, kappa, window_m=100.0)
-
-            base = (0.50 * c) + (0.25 * cb1) + (0.25 * ca1)
-            c_smooth = pd.Series(base).rolling(window=11, center=True, min_periods=1).median().rolling(window=31, center=True, min_periods=1).mean().to_numpy(dtype=float)
-
-            out.loc[idx, "c"] = c
-            out.loc[idx, "cb1"] = cb1
-            out.loc[idx, "ca1"] = ca1
-            out.loc[idx, "c_smooth"] = c_smooth
-
         return out
 
 def build_track_ground_truth(
@@ -421,7 +360,6 @@ def add_should_brake(
 def add_should_throttle(
     lap_df: pd.DataFrame,
     gt: pd.DataFrame,
-    curv_margin: float = 0.0002,
     throttle_prob_min: float = 0.5,
 ) -> pd.DataFrame:
     
@@ -597,25 +535,24 @@ if __name__ == "__main__":
 
     txt_path = MODEL_OUTPUT_DIR / f"{track_name}_player_advice.txt"
     write_advice(advice_df, txt_path, track_name, lap_id="player")
-    print(f"saved advice: {txt_path}")
+    print(f"Saved advice: {txt_path}.")
     ##############################################################
 
     # Save to csv per track:
     for t, gt in gt_by_track.items():
         gt.to_csv(MODEL_OUTPUT_DIR / f"{t}_ground_truth.csv")
 
-    plot_paths = PlotTrackMaps.plot_car_state(
-        scored,
-        out_dir=MODEL_OUTPUT_DIR,
-        brake_threshold=0.7,
-        throttle_threshold=0.5,
-        zone_col="p_brake_zone",
-    )
-    track_name = str(scored["track"].astype(str).iloc[0])
-    dist_paths = PlotTrackMaps.plot_curvature_over_distance(
-        scored,
-        track=track_name,
-        out_dir=MODEL_OUTPUT_DIR,
-        lap_id=None,
-    )
-    print(f"saved {len(plot_paths)} plots and 1 graph to {MODEL_OUTPUT_DIR}")
+        PlotTrackMaps.plot_car_state(
+            scored,
+            track_name=t,
+            out_dir=MODEL_OUTPUT_DIR,
+            brake_threshold=0.6,
+            throttle_threshold=0.6,
+        )
+        PlotTrackMaps.plot_curvature_over_distance(
+            scored,
+            track=t,
+            out_dir=MODEL_OUTPUT_DIR,
+            lap_id=None,
+        )
+    print(f"Saved plots/graphs to {MODEL_OUTPUT_DIR}.")
