@@ -457,9 +457,15 @@ class PlotTrackMaps:
         c_mask = (~b_mask) & (~t_mask)
 
         fig.add_trace(go.Scattergl(x=agg["x"], y=agg["y"], mode="lines", line=dict(color="rgba(0,0,0,0.15)", width=10), name="Centreline", hoverinfo="skip", visible=False), secondary_y=False)
-        fig.add_trace(go.Scattergl(x=agg.loc[c_mask, "x"], y=agg.loc[c_mask, "y"], mode="markers", name="Cornering", marker=dict(size=5, color="rgba(160,160,160,0.7)"), visible=False), secondary_y=False)
-        fig.add_trace(go.Scattergl(x=agg.loc[t_mask, "x"], y=agg.loc[t_mask, "y"], mode="markers", name="Throttle", marker=dict(size=6, color="rgba(34,180,34,0.9)"), visible=False), secondary_y=False)
-        fig.add_trace(go.Scattergl(x=agg.loc[b_mask, "x"], y=agg.loc[b_mask, "y"], mode="markers", name="Brake", marker=dict(size=7, color="rgba(220,20,20,0.95)"), visible=False), secondary_y=False)
+        
+        c_data = agg.loc[c_mask]
+        fig.add_trace(go.Scattergl(x=c_data["x"], y=c_data["y"], mode="markers", name="Cornering", marker=dict(size=5, color="rgba(160,160,160,0.7)"), customdata=np.c_[c_data["cl_dist"], c_data["brake"], c_data["throttle"], c_data["p_brake"], c_data["p_throttle"]], hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>brake=%{customdata[1]:.3f} (p=%{customdata[3]:.3f})<br>throttle=%{customdata[2]:.3f} (p=%{customdata[4]:.3f})<extra></extra>", visible=False), secondary_y=False)
+        
+        t_data = agg.loc[t_mask]
+        fig.add_trace(go.Scattergl(x=t_data["x"], y=t_data["y"], mode="markers", name="Throttle", marker=dict(size=6, color="rgba(34,180,34,0.9)"), customdata=np.c_[t_data["cl_dist"], t_data["throttle"], t_data["p_throttle"]], hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>throttle=%{customdata[1]:.3f} (p=%{customdata[2]:.3f})<extra></extra>", visible=False), secondary_y=False)
+        
+        b_data = agg.loc[b_mask]
+        fig.add_trace(go.Scattergl(x=b_data["x"], y=b_data["y"], mode="markers", name="Brake", marker=dict(size=7, color="rgba(220,20,20,0.95)"), customdata=np.c_[b_data["cl_dist"], b_data["brake"], b_data["p_brake"]], hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>brake=%{customdata[1]:.3f} (p=%{customdata[2]:.3f})<extra></extra>", visible=False), secondary_y=False)
 
         fig.add_trace(go.Scatter(x=base_lap["distance"], y=base_lap[curv_col], mode="lines", name=f"Curvature ({curv_col})", line=dict(color="red", width=2), visible=False), secondary_y=False)
         fig.add_trace(go.Scatter(x=base_lap["distance"], y=base_lap["speed"], mode="lines", name="Speed (km/h)", line=dict(color="blue", width=2), visible=False), secondary_y=False)
