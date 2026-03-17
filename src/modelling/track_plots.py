@@ -111,53 +111,6 @@ class PlotTrackMaps:
                 ),
             )
         )
-
-    @staticmethod
-    def plot_braking_zones_by_track(
-        laps: pd.DataFrame,
-        out_dir: Path,
-        prob_threshold: float = 0.5,
-        zone_col: str = "p_brake_zone",
-        max_zone_points: int = 15000,
-    ) -> list[Path]:
-        out_dir = Path(out_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-
-        outputs: list[Path] = []
-        for track_name, track_df in laps.groupby("track", sort=False):
-            track_name = str(track_name)
-            track_df = track_df.sort_values(["lap_id", "distance"])
-
-            base_lap = PlotTrackMaps._pick_base_lap(track_df)
-            lap_id = str(base_lap["lap_id"].astype(str).iloc[0])
-
-            fig = go.Figure()
-            PlotTrackMaps._add_track_line(fig, base_lap, lap_id=lap_id)
-
-            zone_rows = PlotTrackMaps._select_zone_rows(
-                track_df=track_df,
-                zone_col=str(zone_col),
-                prob_threshold=float(prob_threshold),
-                max_points=int(max_zone_points),
-            )
-            PlotTrackMaps._add_zone_layer(fig, zone_rows, zone_col=str(zone_col), prob_threshold=float(prob_threshold))
-
-            PlotTrackMaps._add_curvature_layer(fig, base_lap)
-
-            fig.update_layout(
-                title=f"{track_name} — {zone_col} overlay",
-                template="plotly_white",
-                xaxis_title="x",
-                yaxis_title="y",
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-            )
-            fig.update_yaxes(scaleanchor="x", scaleratio=1)
-
-            out_path = out_dir / f"{track_name}_{zone_col}.html"
-            pio.write_html(fig, file=str(out_path), auto_open=False, include_plotlyjs="cdn")
-            outputs.append(out_path)
-
-        return outputs
     
     @staticmethod
     def plot_curvature_over_distance(
@@ -508,11 +461,7 @@ class PlotTrackMaps:
         fig.add_trace(go.Scattergl(x=agg.loc[t_mask, "x"], y=agg.loc[t_mask, "y"], mode="markers", name="Throttle", marker=dict(size=6, color="rgba(34,180,34,0.9)"), visible=False), secondary_y=False)
         fig.add_trace(go.Scattergl(x=agg.loc[b_mask, "x"], y=agg.loc[b_mask, "y"], mode="markers", name="Brake", marker=dict(size=7, color="rgba(220,20,20,0.95)"), visible=False), secondary_y=False)
 
-        df_copy = df.copy()
-        df_copy["brake_prev"] = df_copy.groupby(["year", "lap_id"])[brake_col].shift(1).fillna(0)
-        apex_points = df_copy[(df_copy[brake_col] < 0.1) & (df_copy["brake_prev"] >= 0.1) & (df_copy[curv_col] > 0.005)].copy()
-        fig.add_trace(go.Scatter(x=apex_points[curv_col], y=apex_points["speed"], mode="markers", name="Apex", marker=dict(size=6, color="rgba(220,20,60,0.7)"), visible=False), secondary_y=False)
-
+        fig.add_trace(go.Scatter(x=base_lap["distance"], y=base_lap[curv_col], mode="lines", name=f"Curvature ({curv_col})", line=dict(color="red", width=2), visible=False), secondary_y=False)
         fig.add_trace(go.Scatter(x=base_lap["distance"], y=base_lap["speed"], mode="lines", name="Speed (km/h)", line=dict(color="blue", width=2), visible=False), secondary_y=False)
         fig.add_trace(go.Scatter(x=base_lap["distance"], y=base_lap[curv_col], mode="lines", name=f"Curvature ({curv_col})", line=dict(color="red", width=2), visible=False), secondary_y=True)
 
@@ -527,12 +476,16 @@ class PlotTrackMaps:
                     {"visible": [False, False, True, True, True, True, False, False, False]},
                     {"title.text": f"{track_name} — Car State", "xaxis.title.text": "x", "yaxis.title.text": "y", "yaxis.scaleanchor": "x", "yaxis2.visible": False}
                 ]),
+                dict(label="Curvature over Distance", method="update", args=[
+                    {"visible": [False, False, False, False, False, False, True, False, False]},
+                    {"title.text": f"{track_name} — Curvature over Distance", "xaxis.title.text": "Distance (m)", "yaxis.title.text": f"Curvature ({curv_col})", "yaxis.scaleanchor": None, "yaxis2.visible": False}
+                ]),
                 dict(label="Dual Axis (Dist)", method="update", args=[
                     {"visible": [False, False, False, False, False, False, False, True, True]},
                     {"title.text": f"{track_name} — Distance Dual Axis", "xaxis.title.text": "Distance (m)", "yaxis.title.text": "Speed (km/h)", "yaxis.scaleanchor": None, "yaxis2.visible": True}
                 ]),
             ],
-            direction="down", pad={"r": 10, "t": 10}, showactive=True, x=0.1, xanchor="left", y=1.15, yanchor="top"
+            direction="down", pad={"r": 10, "t": 10}, showactive=True, x=0.0, xanchor="left", y=1.2, yanchor="top"
         )]
 
         fig.update_layout(
@@ -542,7 +495,8 @@ class PlotTrackMaps:
             xaxis_title="x",
             yaxis_title="y",
             yaxis=dict(scaleanchor="x", scaleratio=1),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="right", x=1),
+            margin=dict(t=120)
         )
         fig.update_yaxes(title_text=f"Curvature ({curv_col})", secondary_y=True)
         fig.layout.yaxis2.visible = False
