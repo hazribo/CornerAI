@@ -523,7 +523,7 @@ if __name__ == "__main__":
 
     ref_brake = build_references_from_gt(gt, mode="brake")
     ref_throttle = build_references_from_gt(gt, mode="throttle")
-    advice_df = advice(lap_df, ref_brake, ref_throttle)
+    advice_df = advice(lap_df, ref_brake, ref_throttle, gt=gt)
 
     txt_path = MODEL_OUTPUT_DIR / f"{track_name}_player_advice.txt"
     write_advice(advice_df, txt_path, track_name, lap_id="player")
