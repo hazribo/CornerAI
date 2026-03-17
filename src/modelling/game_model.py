@@ -538,17 +538,9 @@ if __name__ == "__main__":
         current_track_laps = project_to_centreline(current_track_laps, cl)
         current_track_laps = model.predict_probability(current_track_laps) 
 
-        PlotTrackMaps.plot_car_state(
+        PlotTrackMaps.plot_track_dashboard(
             current_track_laps,
             track_name=t,
             out_dir=MODEL_OUTPUT_DIR,
-            brake_threshold=0.6,
-            throttle_threshold=0.6,
-        )
-        PlotTrackMaps.plot_curvature_over_distance(
-            current_track_laps,
-            track=t,
-            out_dir=MODEL_OUTPUT_DIR,
-            lap_id=None,
         )
     print(f"Saved plots/graphs to {MODEL_OUTPUT_DIR}.")
