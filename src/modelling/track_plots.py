@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.io as pio
+from plotly.subplots import make_subplots
 
 class PlotTrackMaps:
     CURVATURE_COL = "c_smooth"
@@ -110,53 +111,6 @@ class PlotTrackMaps:
                 ),
             )
         )
-
-    @staticmethod
-    def plot_braking_zones_by_track(
-        laps: pd.DataFrame,
-        out_dir: Path,
-        prob_threshold: float = 0.5,
-        zone_col: str = "p_brake_zone",
-        max_zone_points: int = 15000,
-    ) -> list[Path]:
-        out_dir = Path(out_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-
-        outputs: list[Path] = []
-        for track_name, track_df in laps.groupby("track", sort=False):
-            track_name = str(track_name)
-            track_df = track_df.sort_values(["lap_id", "distance"])
-
-            base_lap = PlotTrackMaps._pick_base_lap(track_df)
-            lap_id = str(base_lap["lap_id"].astype(str).iloc[0])
-
-            fig = go.Figure()
-            PlotTrackMaps._add_track_line(fig, base_lap, lap_id=lap_id)
-
-            zone_rows = PlotTrackMaps._select_zone_rows(
-                track_df=track_df,
-                zone_col=str(zone_col),
-                prob_threshold=float(prob_threshold),
-                max_points=int(max_zone_points),
-            )
-            PlotTrackMaps._add_zone_layer(fig, zone_rows, zone_col=str(zone_col), prob_threshold=float(prob_threshold))
-
-            PlotTrackMaps._add_curvature_layer(fig, base_lap)
-
-            fig.update_layout(
-                title=f"{track_name} — {zone_col} overlay",
-                template="plotly_white",
-                xaxis_title="x",
-                yaxis_title="y",
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-            )
-            fig.update_yaxes(scaleanchor="x", scaleratio=1)
-
-            out_path = out_dir / f"{track_name}_{zone_col}.html"
-            pio.write_html(fig, file=str(out_path), auto_open=False, include_plotlyjs="cdn")
-            outputs.append(out_path)
-
-        return outputs
     
     @staticmethod
     def plot_curvature_over_distance(
@@ -364,5 +318,195 @@ class PlotTrackMaps:
         fig.update_yaxes(scaleanchor="x", scaleratio=1)
 
         out_path = out_dir / f"{track_name}_car_state.html"
+        pio.write_html(fig, file=str(out_path), auto_open=False, include_plotlyjs="cdn")
+        return out_path
+
+    @staticmethod
+    def plot_curvature_and_speed_dual_axis(
+        laps: pd.DataFrame,
+        track_name: str,
+        out_dir: Path,
+        curv_col: str = "c_smooth",
+    ) -> Path:
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        df = laps.loc[laps["track"].astype(str) == str(track_name)].copy()
+        if df.empty:
+            return out_dir / f"{track_name}_dual_axis.html"
+            
+        # Get just one lap to keep the graph readable
+        lap_id = str(df["lap_id"].astype(str).iloc[0])
+        df = df.loc[df["lap_id"].astype(str) == lap_id].sort_values("distance")
+
+        # Create figure with secondary y-axis
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+
+        distance = df["distance"].to_numpy()
+        speed = df["speed"].to_numpy()
+        curvature = df[curv_col].to_numpy()
+
+        # Trace 0: Speed (Primary Y)
+        fig.add_trace(
+            go.Scatter(
+                x=distance, y=speed,
+                mode="lines", name="Speed (km/h)",
+                line=dict(color="blue", width=2)
+            ),
+            secondary_y=False,
+        )
+
+        # Trace 1: Curvature (Secondary Y)
+        fig.add_trace(
+            go.Scatter(
+                x=distance, y=curvature,
+                mode="lines", name=f"Curvature ({curv_col})",
+                line=dict(color="red", width=2)
+            ),
+            secondary_y=True,
+        )
+
+        # Build Dropdown menus
+        updatemenus = [
+            dict(
+                active=0,
+                buttons=list([
+                    dict(
+                        label="Both",
+                        method="update",
+                        args=[{"visible": [True, True]},
+                              {"title": f"{track_name} — Speed and Curvature"}]
+                    ),
+                    dict(
+                        label="Speed Only",
+                        method="update",
+                        args=[{"visible": [True, False]},
+                              {"title": f"{track_name} — Speed Only"}]
+                    ),
+                    dict(
+                        label="Curvature Only",
+                        method="update",
+                        args=[{"visible": [False, True]},
+                              {"title": f"{track_name} — Curvature Only"}]
+                    ),
+                ]),
+                direction="down",
+                pad={"r": 10, "t": 10},
+                showactive=True,
+                x=0.1, xanchor="left",
+                y=1.15, yanchor="top"
+            )
+        ]
+
+        fig.update_layout(
+            title=f"{track_name} — Speed and Curvature (lap_id={lap_id})",
+            template="plotly_white",
+            updatemenus=updatemenus,
+            xaxis_title="Distance (m)",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        )
+
+        fig.update_yaxes(title_text="Speed (km/h)", secondary_y=False, color="blue")
+        fig.update_yaxes(title_text=f"Curvature ({curv_col})", secondary_y=True, color="red")
+
+        out_path = out_dir / f"{track_name}_dual_axis.html"
+        pio.write_html(fig, file=str(out_path), auto_open=False, include_plotlyjs="cdn")
+        return out_path
+
+    @staticmethod
+    def plot_track_dashboard(
+        laps: pd.DataFrame,
+        track_name: str,
+        out_dir: Path,
+        speed_col: str = "predicted_speed",
+        curv_col: str = "c_smooth",
+        brake_threshold: float = 0.4,
+        throttle_threshold: float = 0.4,
+        bin_m: float = 5.0,
+    ) -> Path:
+        from plotly.subplots import make_subplots
+
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        df = laps.loc[laps["track"].astype(str) == str(track_name)].copy()
+        if df.empty:
+            return out_dir / f"{track_name}_dashboard.html"
+
+        df_sorted = df.sort_values(["lap_id", "distance"])
+        lap_id = str(df_sorted["lap_id"].astype(str).iloc[0])
+        base_lap = df_sorted.loc[df_sorted["lap_id"].astype(str) == lap_id]
+
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+
+        actual_speed_col = speed_col if speed_col in base_lap.columns else "speed"
+        fig.add_trace(go.Scattergl(x=base_lap["x"], y=base_lap["y"], mode="lines", name="Track", line=dict(color="rgba(0,0,0,0.55)", width=2), hoverinfo="skip"), secondary_y=False)
+        fig.add_trace(go.Scattergl(x=base_lap["x"], y=base_lap["y"], mode="markers", name=f"Speed ({actual_speed_col})", marker=dict(size=4, color=base_lap[actual_speed_col], colorscale="Turbo", showscale=True, colorbar=dict(title="km/h")), customdata=np.c_[base_lap["distance"], base_lap[actual_speed_col]], hovertemplate="dist: %{customdata[0]:.1f}m<br>speed: %{customdata[1]:.2f} km/h<extra></extra>"), secondary_y=False)
+
+        brake_col = "brake" if "brake" in df.columns else "y_brake_zone"
+        throttle_col = "throttle" if "throttle" in df.columns else "y_throttle_zone"
+        p_brake_col = "p_brake_zone" if "p_brake_zone" in df.columns else brake_col
+        p_throttle_col = "p_throttle_zone" if "p_throttle_zone" in df.columns else throttle_col
+
+        base_lap_copy = base_lap.copy()
+        base_lap_copy["cl_bin"] = (base_lap_copy["cl_dist"] / bin_m).round().astype(int) * bin_m
+        agg = base_lap_copy.groupby("cl_bin", as_index=False).agg(x=("x", "mean"), y=("y", "mean"), brake=(brake_col, "mean"), throttle=(throttle_col, "mean"), p_brake=(p_brake_col, "mean"), p_throttle=(p_throttle_col, "mean"), cl_dist=("cl_dist", "mean")).sort_values("cl_bin").reset_index(drop=True)
+
+        b_mask = agg["brake"] >= brake_threshold
+        t_mask = (~b_mask) & (agg["throttle"] >= throttle_threshold)
+        c_mask = (~b_mask) & (~t_mask)
+
+        fig.add_trace(go.Scattergl(x=agg["x"], y=agg["y"], mode="lines", line=dict(color="rgba(0,0,0,0.15)", width=10), name="Centreline", hoverinfo="skip", visible=False), secondary_y=False)
+        
+        c_data = agg.loc[c_mask]
+        fig.add_trace(go.Scattergl(x=c_data["x"], y=c_data["y"], mode="markers", name="Cornering", marker=dict(size=5, color="rgba(160,160,160,0.7)"), customdata=np.c_[c_data["cl_dist"], c_data["brake"], c_data["throttle"], c_data["p_brake"], c_data["p_throttle"]], hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>brake=%{customdata[1]:.3f} (p=%{customdata[3]:.3f})<br>throttle=%{customdata[2]:.3f} (p=%{customdata[4]:.3f})<extra></extra>", visible=False), secondary_y=False)
+        
+        t_data = agg.loc[t_mask]
+        fig.add_trace(go.Scattergl(x=t_data["x"], y=t_data["y"], mode="markers", name="Throttle", marker=dict(size=6, color="rgba(34,180,34,0.9)"), customdata=np.c_[t_data["cl_dist"], t_data["throttle"], t_data["p_throttle"]], hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>throttle=%{customdata[1]:.3f} (p=%{customdata[2]:.3f})<extra></extra>", visible=False), secondary_y=False)
+        
+        b_data = agg.loc[b_mask]
+        fig.add_trace(go.Scattergl(x=b_data["x"], y=b_data["y"], mode="markers", name="Brake", marker=dict(size=7, color="rgba(220,20,20,0.95)"), customdata=np.c_[b_data["cl_dist"], b_data["brake"], b_data["p_brake"]], hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>brake=%{customdata[1]:.3f} (p=%{customdata[2]:.3f})<extra></extra>", visible=False), secondary_y=False)
+
+        fig.add_trace(go.Scatter(x=base_lap["distance"], y=base_lap[curv_col], mode="lines", name=f"Curvature ({curv_col})", line=dict(color="red", width=2), visible=False), secondary_y=False)
+        fig.add_trace(go.Scatter(x=base_lap["distance"], y=base_lap["speed"], mode="lines", name="Speed (km/h)", line=dict(color="blue", width=2), visible=False), secondary_y=False)
+        fig.add_trace(go.Scatter(x=base_lap["distance"], y=base_lap[curv_col], mode="lines", name=f"Curvature ({curv_col})", line=dict(color="red", width=2), visible=False), secondary_y=True)
+
+        updatemenus = [dict(
+            active=0,
+            buttons=[
+                dict(label="Predicted Speed Map", method="update", args=[
+                    {"visible": [True, True, False, False, False, False, False, False, False]},
+                    {"title.text": f"{track_name} — Predicted Speed", "xaxis.title.text": "x", "yaxis.title.text": "y", "yaxis.scaleanchor": "x", "yaxis2.visible": False}
+                ]),
+                dict(label="Car State Map", method="update", args=[
+                    {"visible": [False, False, True, True, True, True, False, False, False]},
+                    {"title.text": f"{track_name} — Car State", "xaxis.title.text": "x", "yaxis.title.text": "y", "yaxis.scaleanchor": "x", "yaxis2.visible": False}
+                ]),
+                dict(label="Curvature over Distance", method="update", args=[
+                    {"visible": [False, False, False, False, False, False, True, False, False]},
+                    {"title.text": f"{track_name} — Curvature over Distance", "xaxis.title.text": "Distance (m)", "yaxis.title.text": f"Curvature ({curv_col})", "yaxis.scaleanchor": None, "yaxis2.visible": False}
+                ]),
+                dict(label="Dual Axis (Dist)", method="update", args=[
+                    {"visible": [False, False, False, False, False, False, False, True, True]},
+                    {"title.text": f"{track_name} — Distance Dual Axis", "xaxis.title.text": "Distance (m)", "yaxis.title.text": "Speed (km/h)", "yaxis.scaleanchor": None, "yaxis2.visible": True}
+                ]),
+            ],
+            direction="down", pad={"r": 10, "t": 10}, showactive=True, x=0.0, xanchor="left", y=1.2, yanchor="top"
+        )]
+
+        fig.update_layout(
+            title=f"{track_name} — Predicted Speed",
+            template="plotly_white",
+            updatemenus=updatemenus,
+            xaxis_title="x",
+            yaxis_title="y",
+            yaxis=dict(scaleanchor="x", scaleratio=1),
+            legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="right", x=1),
+            margin=dict(t=120)
+        )
+        fig.update_yaxes(title_text=f"Curvature ({curv_col})", secondary_y=True)
+        fig.layout.yaxis2.visible = False
+
+        out_path = out_dir / f"{track_name}_dashboard.html"
         pio.write_html(fig, file=str(out_path), auto_open=False, include_plotlyjs="cdn")
         return out_path
