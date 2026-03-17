@@ -139,7 +139,7 @@ class PlotTrackMaps:
         fig.add_trace(
             go.Scattergl(
                 x=df["distance"].to_numpy(),
-                y=np.abs(df[curvature_col].to_numpy()),
+                y=df[curvature_col].to_numpy(),
                 mode="lines",
                 name=f"|{curvature_col}|",
             )

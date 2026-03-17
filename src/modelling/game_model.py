@@ -228,9 +228,17 @@ class Curvature:
                         .rolling(window=11, center=True, min_periods=1).median()
                         .rolling(window=31, center=True, min_periods=1).mean()
                         .to_numpy(dtype=float))
+            
+            # Get signed smoothness for plotting (pos/neg vals)
+            c_signed_smooth = (pd.Series(kappa)
+                        .rolling(window=11, center=True, min_periods=1).median()
+                        .rolling(window=31, center=True, min_periods=1).mean()
+                        .to_numpy(dtype=float))
 
             out.loc[idx, "c"] = k
-            out.loc[idx, "c_smooth"] = c_smooth
+            out.loc[idx, "c_smooth"] = c_smooth # for model training 
+            out.loc[idx, "c_signed_smooth"] = c_signed_smooth # for plotting only
+            
             for band in range(n_cols):
                 out.loc[idx, f"ca{band + 1}"] = ca_bands[band]
                 out.loc[idx, f"cb{band + 1}"] = cb_bands[band]
@@ -542,5 +550,6 @@ if __name__ == "__main__":
             current_track_laps,
             track_name=t,
             out_dir=MODEL_OUTPUT_DIR,
+            curv_col="c_signed_smooth" # used signed curvature for plots
         )
     print(f"Saved plots/graphs to {MODEL_OUTPUT_DIR}.")
