@@ -14,11 +14,6 @@ def _get_threshold_crossings(distance_array, signal_array, threshold=0.5):
     return [float(distance_array[i]) for i in idx]
 
 def _consolidate_alternating(primary_events, secondary_events, min_sep=40.0):
-    """
-    Groups events if they occur before an alternating counter-event. 
-    E.g. Keeps only the first 'brake' event until a 'throttle' event happens.
-    Also enforces physical separation so micro-blips don't trigger new zones.
-    """
     valid = []
     # Merge both event types into a single distance-sorted timeline
     timeline = [(d, "P") for d in primary_events] + [(d, "S") for d in secondary_events]
@@ -29,7 +24,6 @@ def _consolidate_alternating(primary_events, secondary_events, min_sep=40.0):
     
     for dist, event_type in timeline:
         if event_type == "P":
-            # Only trigger if we aren't already in a primary state
             if last_state != "P":
                 if (dist - last_valid_dist) > min_sep:
                     valid.append(dist)
@@ -62,63 +56,103 @@ def nearest_event(lap: float, refs: list[float]):
     return best if abs(best - float(lap)) <= tolerance else None
 
 def advice(lap: pd.DataFrame, ref_brake: list[float], ref_throttle: list[float], gt: pd.DataFrame = None):
-    df = lap.sort_values("cl_dist")
-    dist = df["cl_dist"].to_numpy(dtype=float)
+    p_df = lap.sort_values("cl_dist").copy()
+    dist = p_df["cl_dist"].to_numpy(dtype=float)
     
-    # Extract raw player events:
-    raw_lap_b = _get_threshold_crossings(dist, df["brake"].to_numpy(dtype=float), threshold=0.6)
-    raw_lap_t = _get_threshold_crossings(dist, df["throttle"].to_numpy(dtype=float), threshold=0.6)
-    # Consolidate these events:
-    lap_brakes = _consolidate_alternating(raw_lap_b, raw_lap_t, min_sep=40.0)
-    lap_throttles = _consolidate_alternating(raw_lap_t, raw_lap_b, min_sep=40.0)
+    # Get raw events for brake and throttle from player lap:
+    raw_lap_b = _get_threshold_crossings(dist, p_df["brake"].to_numpy(dtype=float), threshold=0.6)
+    raw_lap_t = _get_threshold_crossings(dist, p_df["throttle"].to_numpy(dtype=float), threshold=0.6)
+    
+    # Build corner segments using the ground truth:
+    corner_segments = []
+    sorted_brakes = sorted(ref_brake)
+    
+    for i, b_dist in enumerate(sorted_brakes):
+        # Start segment 50m before braking zone:
+        seg_start = b_dist - 50.0  
+        # End segment 50m before the next braking zone (or end of lap):
+        if i < len(sorted_brakes) - 1:
+            seg_end = sorted_brakes[i+1] - 50.0
+        else:
+            # For last corner -> end at end of lap:
+            seg_end = p_df["cl_dist"].max()
+            
+        # Find AI first throttle use:
+        ai_throttles_in_seg = [t for t in ref_throttle if seg_start < t < seg_end]
+        ai_throttle_dist = ai_throttles_in_seg[0] if ai_throttles_in_seg else None
+            
+        corner_segments.append({
+            "corner_id": i + 1,
+            "ai_brake": b_dist,
+            "ai_throttle": ai_throttle_dist,
+            "seg_start": seg_start,
+            "seg_end": seg_end
+        })
 
-    rows: list[dict] = []
-    def add(mode: str, events: list[float], refs: list[float]):
-        used = set()
-        for i, ref_d in enumerate(refs):
-            available = [e for e in events if e not in used]
-            lap_d = nearest_event(ref_d, available)
-            if lap_d is None:
-                continue
-            used.add(lap_d)
-            
-            delta = float(lap_d) - float(ref_d)
-            
-            # Get player's actual speed taking the closest distance point in their lap:
-            player_speed = df.iloc[(df["cl_dist"] - lap_d).abs().argsort()[:1]]["speed"].values[0]
-            
-            # Get expected AI speed taking the closest distance point in ground truth:
-            ai_speed = 0.0
-            if gt is not None and not gt.empty and "speed_exp" in gt.columns:
-                ai_speed = gt.iloc[(gt["cl_dist"] - ref_d).abs().argsort()[:1]]["speed_exp"].values[0]
+    rows = []
+    for corner in corner_segments:
+        # Match player's braking point:
+        player_b_dist = nearest_event(corner["ai_brake"], raw_lap_b)
+        if player_b_dist is not None:
+            delta = player_b_dist - corner["ai_brake"]
+            dist_str = f"Brake {abs(delta):.1f}m later" if delta < 0 else f"Brake {abs(delta):.1f}m earlier"
+        else:
+            dist_str = "Missed braking zone."
 
-            # Format the distance feedback:
-            if mode == "brake":
-                dist_text = f"Brake {abs(delta):.1f}m later" if delta < 0 else f"Brake {abs(delta):.1f}m earlier"
+        # Match player's throttle point:
+        throttle_str = ""
+        if corner["ai_throttle"] is not None:
+            player_t_dist = nearest_event(corner["ai_throttle"], raw_lap_t)
+            if player_t_dist is not None:
+                t_delta = player_t_dist - corner["ai_throttle"]
+                throttle_str = f"Throttle {abs(t_delta):.1f}m later" if t_delta < 0 else f"Throttle {abs(t_delta):.1f}m earlier"
             else:
-                dist_text = f"Throttle {abs(delta):.1f}m later" if delta < 0 else f"Throttle {abs(delta):.1f}m earlier"
-                
-            # Format the combined feedback string:
-            speed_diff_text = f"Going into {mode} zone {i+1} your speed was {player_speed:.0f}km/h; expected AI speed was {ai_speed:.0f}km/h"
-            advice_text = f"{dist_text} ({speed_diff_text})"
+                throttle_str = "Missed throttle zone."
 
-            rows.append({
-                "mode": mode,
-                "zone_index": i+1,
-                "lap_distance": round(float(lap_d), 1),
-                "ref_distance": round(float(ref_d), 1),
-                "delta": round(delta, 1),
-                "advice": advice_text
-            })
+        # Calculate player time:
+        p_slice = p_df[(p_df["cl_dist"] >= corner["seg_start"]) & (p_df["cl_dist"] <= corner["seg_end"])].copy()
+        p_time = 0.0
+        if len(p_slice) > 1:
+            dist_diffs = p_slice["cl_dist"].diff().fillna(0.0).to_numpy()
+            speeds_ms = (p_slice["speed"].clip(lower=1.0) / 3.6).to_numpy() 
+            p_time = np.sum(dist_diffs / speeds_ms) # dt = dx / v
 
-    add("brake", lap_brakes, ref_brake)
-    add("throttle", lap_throttles, ref_throttle)
+        # Calculate AI time:
+        ai_time = 0.0
+        if gt is not None and not gt.empty:
+            ai_slice = gt[(gt["cl_dist"] >= corner["seg_start"]) & (gt["cl_dist"] <= corner["seg_end"])].copy()
+            if len(ai_slice) > 1:
+                ai_dist_diffs = ai_slice["cl_dist"].diff().fillna(0.0).to_numpy()
+                ai_speeds_ms = (ai_slice["speed_exp"].clip(lower=1.0) / 3.6).to_numpy()
+                ai_time = np.sum(ai_dist_diffs / ai_speeds_ms)
 
-    out_df = pd.DataFrame(rows, columns=[
-        "mode", "zone_index", "lap_distance", "ref_distance", "delta", "advice"
-    ])
-    
-    return out_df.sort_values(["mode", "zone_index"]).reset_index(drop=True)
+        # Skip corners where telemetry is missing/broken:
+        if p_time == 0 or ai_time == 0:
+            continue
+
+        time_lost = p_time - ai_time
+        
+        p_entry_speed = p_slice.iloc[0]["speed"] if not p_slice.empty else 0
+        ai_entry_speed = ai_slice.iloc[0]["speed_exp"] if not ai_slice.empty else 0
+        
+        # Combine Brake String, Speed string, and Throttle string
+        advice_text = f"{dist_str} (Entry speed: {p_entry_speed:.0f}km/h vs Expected: {ai_entry_speed:.0f}km/h)\n     {throttle_str}"
+        
+        rows.append({
+            "corner_id": corner["corner_id"],
+            "time_lost_s": time_lost,
+            "advice": advice_text,
+            "seg_start": corner["seg_start"],
+            "seg_end": corner["seg_end"]
+        })
+
+    out_df = pd.DataFrame(rows)
+    if out_df.empty:
+        return out_df
+
+    # Sort by worst segment first:
+    out_df = out_df.sort_values("time_lost_s", ascending=False).reset_index(drop=True)
+    return out_df
 
 def write_advice(advice_df: pd.DataFrame, out_path: Path, track_name: str, lap_id: str) -> Path:
     lines = [f"Track: {track_name}", f"Lap: {lap_id}", ""]
@@ -126,9 +160,11 @@ def write_advice(advice_df: pd.DataFrame, out_path: Path, track_name: str, lap_i
         lines.append("No advice events found.")
     else:
         for row_num, (_, r) in enumerate(advice_df.iterrows(), start=1):
+            time_str = f"Lost {r['time_lost_s']:.2f}s" if r['time_lost_s'] > 0 else f"Gained {abs(r['time_lost_s']):.2f}s"
             lines.append(
-                f"{r['mode']} zone {row_num}: {r['advice']} "
-                f"\n(lap={float(r['lap_distance']):.1f}m, ref={float(r['ref_distance']):.1f}m, delta={float(r['delta']):+.1f}m)"
+                f"Priority {row_num} (Zone {r['corner_id']}): {time_str}"
+                f"\n     {r['advice']}"
+                f"\n     (Segment size: {r['seg_start']:.0f}m to {r['seg_end']:.0f}m)\n"
             )
     out_path.write_text("\n".join(lines), encoding="utf-8")
     return out_path
