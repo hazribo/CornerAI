@@ -61,7 +61,7 @@ def nearest_event(lap: float, refs: list[float]):
     best = float(array[i])
     return best if abs(best - float(lap)) <= tolerance else None
 
-def advice(lap: pd.DataFrame, ref_brake: list[float], ref_throttle: list[float]):
+def advice(lap: pd.DataFrame, ref_brake: list[float], ref_throttle: list[float], gt: pd.DataFrame = None):
     df = lap.sort_values("cl_dist")
     dist = df["cl_dist"].to_numpy(dtype=float)
     
@@ -84,10 +84,23 @@ def advice(lap: pd.DataFrame, ref_brake: list[float], ref_throttle: list[float])
             
             delta = float(lap_d) - float(ref_d)
             
+            # Get player's actual speed taking the closest distance point in their lap:
+            player_speed = df.iloc[(df["cl_dist"] - lap_d).abs().argsort()[:1]]["speed"].values[0]
+            
+            # Get expected AI speed taking the closest distance point in ground truth:
+            ai_speed = 0.0
+            if gt is not None and not gt.empty and "speed_exp" in gt.columns:
+                ai_speed = gt.iloc[(gt["cl_dist"] - ref_d).abs().argsort()[:1]]["speed_exp"].values[0]
+
+            # Format the distance feedback:
             if mode == "brake":
-                advice_text = f"Brake {abs(delta):.1f}m later" if delta < 0 else f"Brake {abs(delta):.1f}m earlier"
+                dist_text = f"Brake {abs(delta):.1f}m later" if delta < 0 else f"Brake {abs(delta):.1f}m earlier"
             else:
-                advice_text = f"Throttle {abs(delta):.1f}m later" if delta < 0 else f"Throttle {abs(delta):.1f}m earlier"
+                dist_text = f"Throttle {abs(delta):.1f}m later" if delta < 0 else f"Throttle {abs(delta):.1f}m earlier"
+                
+            # Format the combined feedback string:
+            speed_diff_text = f"Going into {mode} zone {i+1} your speed was {player_speed:.0f}km/h; expected AI speed was {ai_speed:.0f}km/h"
+            advice_text = f"{dist_text} ({speed_diff_text})"
 
             rows.append({
                 "mode": mode,
@@ -115,7 +128,7 @@ def write_advice(advice_df: pd.DataFrame, out_path: Path, track_name: str, lap_i
         for row_num, (_, r) in enumerate(advice_df.iterrows(), start=1):
             lines.append(
                 f"{r['mode']} zone {row_num}: {r['advice']} "
-                f"(lap={float(r['lap_distance']):.1f}m, ref={float(r['ref_distance']):.1f}m, delta={float(r['delta']):+.1f}m)"
+                f"\n(lap={float(r['lap_distance']):.1f}m, ref={float(r['ref_distance']):.1f}m, delta={float(r['delta']):+.1f}m)"
             )
     out_path.write_text("\n".join(lines), encoding="utf-8")
     return out_path
