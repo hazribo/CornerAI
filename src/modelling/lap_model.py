@@ -35,6 +35,8 @@ LABELS = {
     "throttle_window_min": 10.0
 }
 
+# TODO: make compatible with game model code/advice/plots for comparisons between real laps and player-driven laps in-game.
+
 def load_build_cache(
     cache_name: str = "laps_cached.pkl",
     rebuild: bool = False,

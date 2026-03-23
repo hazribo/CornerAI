@@ -501,13 +501,13 @@ if __name__ == "__main__":
     cl_by_track: dict[str, pd.DataFrame] = {}
     gt_by_track: dict[str, pd.DataFrame] = {}
     
-    # Notice we loop over fast_laps, NOT scored!
     for track_name, track_df in fast_laps.groupby("track", sort=False):
         cl = build_centreline(fast_laps, track=str(track_name), bin_m=5.0)
         gt = build_track_ground_truth(fast_laps, track=str(track_name), cl=cl, bin_m=5.0)
         cl_by_track[str(track_name)] = cl
         gt_by_track[str(track_name)] = gt
 
+    # TODO: have advice running real-time in f1_25_listener.py rather than here after training.
     # TESTING ADVICE:
     target_track = "1 melbourne"
     target_lap_id_path = Path(__file__).resolve().parents[2] / "data" / "processed" / "f1-25" / "laps" / "1 melbourne"
