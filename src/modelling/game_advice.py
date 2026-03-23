@@ -91,15 +91,46 @@ def advice(lap: pd.DataFrame, ref_brake: list[float], ref_throttle: list[float],
 
     rows = []
     for corner in corner_segments:
-        # Match player's braking point:
+        # Match player's braking point to get the exact brake distance:
         player_b_dist = nearest_event(corner["ai_brake"], raw_lap_b)
+        # Get entry speed for exact point player braked:
+        p_entry_speed = 0
         if player_b_dist is not None:
-            delta = player_b_dist - corner["ai_brake"]
-            dist_str = f"Brake {abs(delta):.1f}m later" if delta < 0 else f"Brake {abs(delta):.1f}m earlier"
+            # Find the closest telemetry row to the player's braking distance
+            p_b_slice = p_df.iloc[(p_df["cl_dist"] - player_b_dist).abs().argsort()[:1]]
+            p_entry_speed = p_b_slice["speed"].iloc[0] if not p_b_slice.empty else 0
+        
+        # Get entry speed for where the AI braked:
+        ai_entry_speed = 0
+        if gt is not None and not gt.empty:
+            ai_slice = gt.iloc[(gt["cl_dist"] - corner["ai_brake"]).abs().argsort()[:1]]
+            ai_entry_speed = ai_slice["speed_exp"].iloc[0] if not ai_slice.empty else 0
+
+        if player_b_dist is not None:
+            raw_delta = player_b_dist - corner["ai_brake"]
+            
+            # Convert km/h to m/s:
+            p_v_ms = float(p_entry_speed) / 3.6
+            ai_v_ms = float(ai_entry_speed) / 3.6
+            # Assume constant F1 deceleration of ~4.5G (44.1 m/s^2)
+            a = 44.1
+            # Calculate stopping distance for player and AI:
+            p_stop_dist = (p_v_ms**2) / (2 * a)
+            ai_stop_dist = (ai_v_ms**2) / (2 * a)
+            # Use these to calculate the stopping offset:
+            physics_offset = p_stop_dist - ai_stop_dist
+            adjusted_delta = raw_delta + physics_offset
+            
+            if adjusted_delta < -3.0: 
+                dist_str = f"Brake {abs(adjusted_delta):.1f}m later"
+            elif adjusted_delta > 3.0:
+                dist_str = f"Brake {abs(adjusted_delta):.1f}m earlier"
+            else:
+                dist_str = "Optimal braking."
         else:
             dist_str = "Missed braking zone."
 
-        # Match player's throttle point:
+        # Getting back on throttle is usually the same regardless of speed (generalising), so not needed below.
         throttle_str = ""
         if corner["ai_throttle"] is not None:
             player_t_dist = nearest_event(corner["ai_throttle"], raw_lap_t)
@@ -111,6 +142,8 @@ def advice(lap: pd.DataFrame, ref_brake: list[float], ref_throttle: list[float],
 
         # Calculate player time:
         p_slice = p_df[(p_df["cl_dist"] >= corner["seg_start"]) & (p_df["cl_dist"] <= corner["seg_end"])].copy()
+
+        # Calculate player time:
         p_time = 0.0
         if len(p_slice) > 1:
             dist_diffs = p_slice["cl_dist"].diff().fillna(0.0).to_numpy()
@@ -131,12 +164,15 @@ def advice(lap: pd.DataFrame, ref_brake: list[float], ref_throttle: list[float],
             continue
 
         time_lost = p_time - ai_time
+
+        # Get braking marks for advice:
+        if player_b_dist is not None:
+            brake_marks = f"\n     Braking mark: {player_b_dist:.1f}m (Expected: {corner['ai_brake']:.1f}m)"
+        else:
+            brake_marks = f"\n     Braking mark: Missed (Expected: {corner['ai_brake']:.1f}m)"
         
-        p_entry_speed = p_slice.iloc[0]["speed"] if not p_slice.empty else 0
-        ai_entry_speed = ai_slice.iloc[0]["speed_exp"] if not ai_slice.empty else 0
-        
-        # Combine Brake String, Speed string, and Throttle string
-        advice_text = f"{dist_str} (Entry speed: {p_entry_speed:.0f}km/h vs Expected: {ai_entry_speed:.0f}km/h)\n     {throttle_str}"
+        # Combine all feedback strings:
+        advice_text = f"{dist_str} (Entry speed: {p_entry_speed:.0f}km/h vs Expected: {ai_entry_speed:.0f}km/h){brake_marks}\n     {throttle_str}"
         
         rows.append({
             "corner_id": corner["corner_id"],
