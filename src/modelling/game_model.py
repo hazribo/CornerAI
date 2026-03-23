@@ -501,7 +501,6 @@ if __name__ == "__main__":
     cl_by_track: dict[str, pd.DataFrame] = {}
     gt_by_track: dict[str, pd.DataFrame] = {}
     
-    # Notice we loop over fast_laps, NOT scored!
     for track_name, track_df in fast_laps.groupby("track", sort=False):
         cl = build_centreline(fast_laps, track=str(track_name), bin_m=5.0)
         gt = build_track_ground_truth(fast_laps, track=str(track_name), cl=cl, bin_m=5.0)

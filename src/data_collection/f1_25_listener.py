@@ -9,8 +9,8 @@ from pathlib import Path
 modelling_dir = Path(__file__).resolve().parents[1] / "modelling"
 sys.path.append(str(modelling_dir))
 try:
-    from game_model import RandomForestModel, Curvature # type: ignore
-    from game_advice import advice # type: ignore
+    from game_model import RandomForestModel, Curvature, project_to_centreline, add_should_brake, add_should_throttle # type: ignore
+    from game_advice import build_references_from_gt, advice, write_advice # type: ignore
 except ImportError as e:
     print(f"Warning: {e}")
     
@@ -69,9 +69,29 @@ current_track_id = -1
 
 udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 udp.bind((UDP_IP, UDP_PORT))
-print("Listening on " + UDP_IP + ":" + str(UDP_PORT))
+print("Listening on " + UDP_IP + ":" + str(UDP_PORT))                            
 
-# TODO: load game model and advice for use here directly after lap has been driven.
+def get_advice(filename: Path, df: pd.DataFrame):
+    target_track = df["track"].iloc[0                                         ]
+    target_lap_id = str(filename)
+    gt_path = models_dir / f"{target_track}_ground_truth.csv"
+
+    gt = pd.read_csv(gt_path)
+    ref_brake = build_references_from_gt(gt, mode="brake")
+    ref_throttle = build_references_from_gt(gt, mode="throttle")
+
+    player_lap = pd.read_csv(filename)
+    player_lap = Curvature.add_curv_cols(df, n_cols=4)
+    player_lap = model.predict_probability(player_lap)
+    player_lap["cl_dist"] = player_lap["distance"] # TODO: fix this dependency
+
+    lap_df = add_should_brake(player_lap, gt)
+    lap_df = add_should_throttle(player_lap, gt).sort_values("cl_dist")
+
+    advice_df = advice(lap_df, ref_brake, ref_throttle, gt=gt)
+    advice_path = output_dir / f"{target_lap_id}_advice.txt"
+    write_advice(advice_df, advice_path, track_name=target_track, lap_id=filename)
+    print(f"Saved advice to {advice_path}")
 
 def save_lap_csv(filename, data_points):
     if not data_points:
@@ -105,12 +125,15 @@ def save_lap_csv(filename, data_points):
     df["source"] = "f125"
 
     df["track"] = TRACK_IDS.get(current_track_id)              
-    df["difficulty"] = "PLAYER"
+    df["difficulty"] = "999" # placeholder for "player"
     df["year"] = year
     df["lap_id"] = filename
 
+    # Save telemetry to CSV:
     df.to_csv(filename, index=False)
     print(f"Saved {filename} with {len(df)} points")
+    # Get advice for this lap; will also be saved:
+    get_advice(filename, df)
 
 while True:
     data, addr = udp.recvfrom(4096)
