@@ -83,7 +83,9 @@ def get_advice(filename: Path, df: pd.DataFrame):
     player_lap = pd.read_csv(filename)
     player_lap = Curvature.add_curv_cols(df, n_cols=4)
     player_lap = model.predict_probability(player_lap)
-    player_lap["cl_dist"] = player_lap["distance"] # TODO: fix this dependency
+    # Project player's coordinates to the nearest centreline point for cl_dist:
+    cl = gt[["x_exp", "y_exp", "cl_dist"]].rename(columns={"x_exp": "x", "y_exp": "y"})
+    player_lap = project_to_centreline(player_lap, cl)
 
     lap_df = add_should_brake(player_lap, gt)
     lap_df = add_should_throttle(player_lap, gt).sort_values("cl_dist")
