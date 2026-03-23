@@ -511,7 +511,8 @@ if __name__ == "__main__":
     # TODO: have advice running real-time in f1_25_listener.py rather than here after training.
     # TESTING ADVICE:
     target_track = "1 melbourne"
-    target_lap_id = Path(r"Z:\CornerAI\data\processed\f1-25\laps\1 melbourne\lap_1.csv")
+    target_lap_id_path = Path(__file__).resolve().parents[2] / "data" / "processed" / "f1-25" / "laps" / "1 melbourne"
+    target_lap_id = f"{target_lap_id_path}/lap_1.csv"
 
     player_lap = pd.read_csv(target_lap_id)
     player_lap["track"] = target_track
