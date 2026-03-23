@@ -26,6 +26,8 @@ current_sector = 1
 
 current_telemetry = {}
 
+# TODO: load game model and advice for use here directly after lap has been driven.
+
 def save_lap_csv(filename, car_index, lap_number, lap_time_ms, data_points):
     if not data_points:
         return

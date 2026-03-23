@@ -508,6 +508,7 @@ if __name__ == "__main__":
         cl_by_track[str(track_name)] = cl
         gt_by_track[str(track_name)] = gt
 
+    # TODO: have advice running real-time in f1_25_listener.py rather than here after training.
     # TESTING ADVICE:
     target_track = "1 melbourne"
     target_lap_id = Path(r"Z:\CornerAI\data\processed\f1-25\laps\1 melbourne\lap_1.csv")
