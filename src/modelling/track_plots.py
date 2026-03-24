@@ -412,6 +412,108 @@ class PlotTrackMaps:
         out_path = out_dir / f"{track_name}_dual_axis.html"
         pio.write_html(fig, file=str(out_path), auto_open=False, include_plotlyjs="cdn")
         return out_path
+    
+    @staticmethod
+    def plot_car_state_3d(
+        laps: pd.DataFrame,
+        track_name: str,
+        out_dir: Path,
+        brake_threshold: float = 0.4,
+        throttle_threshold: float = 0.4,
+        bin_m: float = 5.0,
+        z_col: str = "z"
+    ) -> Path:
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        track_df = laps.loc[laps["track"].astype(str) == str(track_name)].copy()
+        if track_df.empty:
+            return out_dir / f"{track_name}_car_state_3d.html"
+
+        brake_col = "brake" if "brake" in track_df.columns else "y_brake_zone"
+        throttle_col = "throttle" if "throttle" in track_df.columns else "y_throttle_zone"
+        
+        p_brake_col = "p_brake_zone" if "p_brake_zone" in track_df.columns else brake_col
+        p_throttle_col = "p_throttle_zone" if "p_throttle_zone" in track_df.columns else throttle_col
+
+        track_df["cl_bin"] = (track_df["cl_dist"] / bin_m).round().astype(int) * bin_m
+        
+        agg = (
+            track_df.groupby("cl_bin", as_index=False)
+            .agg(x=("x", "mean"), y=("y", "mean"), z_val=(z_col, "mean"),
+                brake=(brake_col, "mean"),
+                throttle=(throttle_col, "mean"),
+                p_brake=(p_brake_col, "mean"),
+                p_throttle=(p_throttle_col, "mean"),
+                cl_dist=("cl_dist", "mean"))
+            .sort_values("cl_bin")
+            .reset_index(drop=True)
+        )
+
+        brake_val    = agg["brake"].to_numpy(dtype=float)
+        throttle_val = agg["throttle"].to_numpy(dtype=float)
+        p_brake      = agg["p_brake"].to_numpy(dtype=float)
+        p_throttle   = agg["p_throttle"].to_numpy(dtype=float)
+        x  = agg["x"].to_numpy()
+        y  = agg["y"].to_numpy()
+        z  = agg["z_val"].to_numpy()
+        cl = agg["cl_dist"].to_numpy()
+
+        brake_mask    = brake_val >= brake_threshold
+        throttle_mask = (~brake_mask) & (throttle_val >= throttle_threshold)
+        corner_mask   = (~brake_mask) & (~throttle_mask)
+
+        fig = go.Figure()
+        
+        fig.add_trace(go.Scatter3d(
+            x=x, y=y, z=z, mode="lines",
+            line=dict(color="rgba(0,0,0,0.15)", width=4),
+            name="Centreline", hoverinfo="skip",
+        ))
+        
+        if corner_mask.any():
+            fig.add_trace(go.Scatter3d(
+                x=x[corner_mask], y=y[corner_mask], z=z[corner_mask], mode="markers",
+                name="Cornering",
+                marker=dict(size=4, color="rgba(160,160,160,0.7)"),
+                customdata=np.c_[cl[corner_mask], brake_val[corner_mask], throttle_val[corner_mask], p_brake[corner_mask], p_throttle[corner_mask]],
+                hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>brake=%{customdata[1]:.3f} (p=%{customdata[3]:.3f})<br>throttle=%{customdata[2]:.3f} (p=%{customdata[4]:.3f})<extra></extra>",
+            ))
+            
+        if throttle_mask.any():
+            fig.add_trace(go.Scatter3d(
+                x=x[throttle_mask], y=y[throttle_mask], z=z[throttle_mask], mode="markers",
+                name="Throttle zone",
+                marker=dict(size=5, color="rgba(34,180,34,0.9)"),
+                customdata=np.c_[cl[throttle_mask], throttle_val[throttle_mask], p_throttle[throttle_mask]],
+                hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>throttle=%{customdata[1]:.3f} (p=%{customdata[2]:.3f})<extra></extra>",
+            ))
+            
+        if brake_mask.any():
+            fig.add_trace(go.Scatter3d(
+                x=x[brake_mask], y=y[brake_mask], z=z[brake_mask], mode="markers",
+                name="Brake zone",
+                marker=dict(size=6, color="rgba(220,20,20,0.95)"),
+                customdata=np.c_[cl[brake_mask], brake_val[brake_mask], p_brake[brake_mask]],
+                hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>brake=%{customdata[1]:.3f} (p=%{customdata[2]:.3f})<extra></extra>",
+            ))
+
+        fig.update_layout(
+            title=f"{track_name} — 3D Braking / Throttle Zones",
+            template="plotly_white",
+            scene=dict(
+                xaxis_title="X",
+                yaxis_title="Y",
+                zaxis_title=z_col.capitalize(),
+                aspectmode='data'
+            ),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+            margin=dict(l=0, r=0, b=0, t=50)
+        )
+
+        out_path = out_dir / f"{track_name}_car_state_3d.html"
+        pio.write_html(fig, file=str(out_path), auto_open=False, include_plotlyjs="cdn")
+        return out_path
 
     @staticmethod
     def plot_track_dashboard(
@@ -423,6 +525,7 @@ class PlotTrackMaps:
         brake_threshold: float = 0.4,
         throttle_threshold: float = 0.4,
         bin_m: float = 5.0,
+        z_col: str = "z",
     ) -> Path:
         from plotly.subplots import make_subplots
 
@@ -440,6 +543,8 @@ class PlotTrackMaps:
         fig = make_subplots(specs=[[{"secondary_y": True}]])
 
         actual_speed_col = speed_col if speed_col in base_lap.columns else "speed"
+        actual_z_col = z_col if z_col in base_lap.columns else actual_speed_col # fallback for z
+        
         fig.add_trace(go.Scattergl(x=base_lap["x"], y=base_lap["y"], mode="lines", name="Track", line=dict(color="rgba(0,0,0,0.55)", width=2), hoverinfo="skip"), secondary_y=False)
         fig.add_trace(go.Scattergl(x=base_lap["x"], y=base_lap["y"], mode="markers", name=f"Speed ({actual_speed_col})", marker=dict(size=4, color=base_lap[actual_speed_col], colorscale="Turbo", showscale=True, colorbar=dict(title="km/h")), customdata=np.c_[base_lap["distance"], base_lap[actual_speed_col]], hovertemplate="dist: %{customdata[0]:.1f}m<br>speed: %{customdata[1]:.2f} km/h<extra></extra>"), secondary_y=False)
 
@@ -450,7 +555,11 @@ class PlotTrackMaps:
 
         base_lap_copy = base_lap.copy()
         base_lap_copy["cl_bin"] = (base_lap_copy["cl_dist"] / bin_m).round().astype(int) * bin_m
-        agg = base_lap_copy.groupby("cl_bin", as_index=False).agg(x=("x", "mean"), y=("y", "mean"), brake=(brake_col, "mean"), throttle=(throttle_col, "mean"), p_brake=(p_brake_col, "mean"), p_throttle=(p_throttle_col, "mean"), cl_dist=("cl_dist", "mean")).sort_values("cl_bin").reset_index(drop=True)
+        
+        agg = base_lap_copy.groupby("cl_bin", as_index=False).agg(
+            x=("x", "mean"), y=("y", "mean"), z_val=(actual_z_col, "mean"),
+            brake=(brake_col, "mean"), throttle=(throttle_col, "mean"), p_brake=(p_brake_col, "mean"), p_throttle=(p_throttle_col, "mean"), cl_dist=("cl_dist", "mean")
+        ).sort_values("cl_bin").reset_index(drop=True)
 
         b_mask = agg["brake"] >= brake_threshold
         t_mask = (~b_mask) & (agg["throttle"] >= throttle_threshold)
@@ -470,24 +579,33 @@ class PlotTrackMaps:
         fig.add_trace(go.Scatter(x=base_lap["distance"], y=base_lap[curv_col], mode="lines", name=f"Curvature ({curv_col})", line=dict(color="red", width=2), visible=False), secondary_y=False)
         fig.add_trace(go.Scatter(x=base_lap["distance"], y=base_lap["speed"], mode="lines", name="Speed (km/h)", line=dict(color="blue", width=2), visible=False), secondary_y=False)
         fig.add_trace(go.Scatter(x=base_lap["distance"], y=base_lap[curv_col], mode="lines", name=f"Curvature ({curv_col})", line=dict(color="red", width=2), visible=False), secondary_y=True)
+        # 3D for 3D car state:
+        fig.add_trace(go.Scatter3d(x=agg["x"], y=agg["y"], z=agg["z_val"], mode="lines", line=dict(color="rgba(0,0,0,0.15)", width=4), name="Centreline (3D)", hoverinfo="skip", visible=False))
+        fig.add_trace(go.Scatter3d(x=c_data["x"], y=c_data["y"], z=c_data["z_val"], mode="markers", name="Cornering (3D)", marker=dict(size=4, color="rgba(160,160,160,0.7)"), customdata=np.c_[c_data["cl_dist"], c_data["brake"], c_data["throttle"], c_data["p_brake"], c_data["p_throttle"]], hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>brake=%{customdata[1]:.3f} (p=%{customdata[3]:.3f})<br>throttle=%{customdata[2]:.3f} (p=%{customdata[4]:.3f})<extra></extra>", visible=False))
+        fig.add_trace(go.Scatter3d(x=t_data["x"], y=t_data["y"], z=t_data["z_val"], mode="markers", name="Throttle (3D)", marker=dict(size=5, color="rgba(34,180,34,0.9)"), customdata=np.c_[t_data["cl_dist"], t_data["throttle"], t_data["p_throttle"]], hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>throttle=%{customdata[1]:.3f} (p=%{customdata[2]:.3f})<extra></extra>", visible=False))
+        fig.add_trace(go.Scatter3d(x=b_data["x"], y=b_data["y"], z=b_data["z_val"], mode="markers", name="Brake (3D)", marker=dict(size=6, color="rgba(220,20,20,0.95)"), customdata=np.c_[b_data["cl_dist"], b_data["brake"], b_data["p_brake"]], hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>brake=%{customdata[1]:.3f} (p=%{customdata[2]:.3f})<extra></extra>", visible=False))
 
         updatemenus = [dict(
             active=0,
             buttons=[
                 dict(label="Predicted Speed Map", method="update", args=[
-                    {"visible": [True, True, False, False, False, False, False, False, False]},
+                    {"visible": [True, True, False, False, False, False, False, False, False, False, False, False, False]},
                     {"title.text": f"{track_name} — Predicted Speed", "xaxis.title.text": "x", "yaxis.title.text": "y", "yaxis.scaleanchor": "x", "yaxis2.visible": False}
                 ]),
                 dict(label="Car State Map", method="update", args=[
-                    {"visible": [False, False, True, True, True, True, False, False, False]},
+                    {"visible": [False, False, True, True, True, True, False, False, False, False, False, False, False]},
                     {"title.text": f"{track_name} — Car State", "xaxis.title.text": "x", "yaxis.title.text": "y", "yaxis.scaleanchor": "x", "yaxis2.visible": False}
                 ]),
+                dict(label="Car State Map (3D)", method="update", args=[
+                    {"visible": [False, False, False, False, False, False, False, False, False, True, True, True, True]},
+                    {"title.text": f"{track_name} — 3D Car State", "xaxis.title.text": "", "yaxis.title.text": "", "yaxis2.visible": False} # Scene ignores standard x/y axes titles during view
+                ]),
                 dict(label="Curvature over Distance", method="update", args=[
-                    {"visible": [False, False, False, False, False, False, True, False, False]},
+                    {"visible": [False, False, False, False, False, False, True, False, False, False, False, False, False]},
                     {"title.text": f"{track_name} — Curvature over Distance", "xaxis.title.text": "Distance (m)", "yaxis.title.text": f"Curvature ({curv_col})", "yaxis.scaleanchor": None, "yaxis2.visible": False}
                 ]),
                 dict(label="Dual Axis (Dist)", method="update", args=[
-                    {"visible": [False, False, False, False, False, False, False, True, True]},
+                    {"visible": [False, False, False, False, False, False, False, True, True, False, False, False, False]},
                     {"title.text": f"{track_name} — Distance Dual Axis", "xaxis.title.text": "Distance (m)", "yaxis.title.text": "Speed (km/h)", "yaxis.scaleanchor": None, "yaxis2.visible": True}
                 ]),
             ],
@@ -501,6 +619,7 @@ class PlotTrackMaps:
             xaxis_title="x",
             yaxis_title="y",
             yaxis=dict(scaleanchor="x", scaleratio=1),
+            scene=dict(aspectmode='data', zaxis_title=actual_z_col.capitalize()), 
             legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="right", x=1),
             margin=dict(t=120)
         )
