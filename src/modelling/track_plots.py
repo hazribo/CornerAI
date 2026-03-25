@@ -579,33 +579,43 @@ class PlotTrackMaps:
         fig.add_trace(go.Scatter(x=base_lap["distance"], y=base_lap[curv_col], mode="lines", name=f"Curvature ({curv_col})", line=dict(color="red", width=2), visible=False), secondary_y=False)
         fig.add_trace(go.Scatter(x=base_lap["distance"], y=base_lap["speed"], mode="lines", name="Speed (km/h)", line=dict(color="blue", width=2), visible=False), secondary_y=False)
         fig.add_trace(go.Scatter(x=base_lap["distance"], y=base_lap[curv_col], mode="lines", name=f"Curvature ({curv_col})", line=dict(color="red", width=2), visible=False), secondary_y=True)
-        # 3D for 3D car state:
-        fig.add_trace(go.Scatter3d(x=agg["x"], y=agg["y"], z=agg["z_val"], mode="lines", line=dict(color="rgba(0,0,0,0.15)", width=4), name="Centreline (3D)", hoverinfo="skip", visible=False))
-        fig.add_trace(go.Scatter3d(x=c_data["x"], y=c_data["y"], z=c_data["z_val"], mode="markers", name="Cornering (3D)", marker=dict(size=4, color="rgba(160,160,160,0.7)"), customdata=np.c_[c_data["cl_dist"], c_data["brake"], c_data["throttle"], c_data["p_brake"], c_data["p_throttle"]], hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>brake=%{customdata[1]:.3f} (p=%{customdata[3]:.3f})<br>throttle=%{customdata[2]:.3f} (p=%{customdata[4]:.3f})<extra></extra>", visible=False))
-        fig.add_trace(go.Scatter3d(x=t_data["x"], y=t_data["y"], z=t_data["z_val"], mode="markers", name="Throttle (3D)", marker=dict(size=5, color="rgba(34,180,34,0.9)"), customdata=np.c_[t_data["cl_dist"], t_data["throttle"], t_data["p_throttle"]], hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>throttle=%{customdata[1]:.3f} (p=%{customdata[2]:.3f})<extra></extra>", visible=False))
-        fig.add_trace(go.Scatter3d(x=b_data["x"], y=b_data["y"], z=b_data["z_val"], mode="markers", name="Brake (3D)", marker=dict(size=6, color="rgba(220,20,20,0.95)"), customdata=np.c_[b_data["cl_dist"], b_data["brake"], b_data["p_brake"]], hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>brake=%{customdata[1]:.3f} (p=%{customdata[2]:.3f})<extra></extra>", visible=False))
+
+        # Struts for 3D Car State:
+        z_min = agg["z_val"].min()
+        x_struts, y_struts, z_struts = [], [], []
+        for x_p, y_p, z_p in zip(agg["x"][::2], agg["y"][::2], agg["z_val"][::2]):
+            x_struts.extend([x_p, x_p, None])
+            y_struts.extend([y_p, y_p, None])
+            z_struts.extend([z_p, z_min, None])
+            
+        fig.add_trace(go.Scatter3d(x=x_struts, y=y_struts, z=z_struts, mode="lines", line=dict(color="rgba(0,0,0,0.1)", width=2), name="Supports", hoverinfo="skip", visible=False))
+        fig.add_trace(go.Scatter3d(x=agg["x"], y=agg["y"], z=agg["z_val"], mode="lines", line=dict(color="rgba(0,0,0,0.3)", width=4), name="Centreline (3D)", hoverinfo="skip", visible=False))
+        fig.add_trace(go.Scatter3d(x=c_data["x"], y=c_data["y"], z=c_data["z_val"], mode="markers", name="Cornering (3D)", marker=dict(size=3, color="rgba(160,160,160,0.7)"), customdata=np.c_[c_data["cl_dist"], c_data["brake"], c_data["throttle"], c_data["p_brake"], c_data["p_throttle"]], hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>brake=%{customdata[1]:.3f} (p=%{customdata[3]:.3f})<br>throttle=%{customdata[2]:.3f} (p=%{customdata[4]:.3f})<extra></extra>", visible=False))
+        fig.add_trace(go.Scatter3d(x=t_data["x"], y=t_data["y"], z=t_data["z_val"], mode="markers", name="Throttle (3D)", marker=dict(size=4, color="rgba(34,180,34,0.9)"), customdata=np.c_[t_data["cl_dist"], t_data["throttle"], t_data["p_throttle"]], hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>throttle=%{customdata[1]:.3f} (p=%{customdata[2]:.3f})<extra></extra>", visible=False))
+        fig.add_trace(go.Scatter3d(x=b_data["x"], y=b_data["y"], z=b_data["z_val"], mode="markers", name="Brake (3D)", marker=dict(size=5, color="rgba(220,20,20,0.95)"), customdata=np.c_[b_data["cl_dist"], b_data["brake"], b_data["p_brake"]], hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>brake=%{customdata[1]:.3f} (p=%{customdata[2]:.3f})<extra></extra>", visible=False))
 
         updatemenus = [dict(
             active=0,
             buttons=[
                 dict(label="Predicted Speed Map", method="update", args=[
-                    {"visible": [True, True, False, False, False, False, False, False, False, False, False, False, False]},
+                    {"visible": [True, True, False, False, False, False, False, False, False, False, False, False, False, False]},
                     {"title.text": f"{track_name} — Predicted Speed", "xaxis.title.text": "x", "yaxis.title.text": "y", "yaxis.scaleanchor": "x", "yaxis2.visible": False}
                 ]),
                 dict(label="Car State Map", method="update", args=[
-                    {"visible": [False, False, True, True, True, True, False, False, False, False, False, False, False]},
+                    {"visible": [False, False, True, True, True, True, False, False, False, False, False, False, False, False]},
                     {"title.text": f"{track_name} — Car State", "xaxis.title.text": "x", "yaxis.title.text": "y", "yaxis.scaleanchor": "x", "yaxis2.visible": False}
                 ]),
                 dict(label="Car State Map (3D)", method="update", args=[
-                    {"visible": [False, False, False, False, False, False, False, False, False, True, True, True, True]},
-                    {"title.text": f"{track_name} — 3D Car State", "xaxis.title.text": "", "yaxis.title.text": "", "yaxis2.visible": False} # Scene ignores standard x/y axes titles during view
+                    # Turns on [9, 10, 11, 12, 13]
+                    {"visible": [False, False, False, False, False, False, False, False, False, True, True, True, True, True]},
+                    {"title.text": f"{track_name} — 3D Car State", "xaxis.title.text": "", "yaxis.title.text": "", "yaxis2.visible": False}
                 ]),
                 dict(label="Curvature over Distance", method="update", args=[
-                    {"visible": [False, False, False, False, False, False, True, False, False, False, False, False, False]},
+                    {"visible": [False, False, False, False, False, False, True, False, False, False, False, False, False, False]},
                     {"title.text": f"{track_name} — Curvature over Distance", "xaxis.title.text": "Distance (m)", "yaxis.title.text": f"Curvature ({curv_col})", "yaxis.scaleanchor": None, "yaxis2.visible": False}
                 ]),
                 dict(label="Dual Axis (Dist)", method="update", args=[
-                    {"visible": [False, False, False, False, False, False, False, True, True, False, False, False, False]},
+                    {"visible": [False, False, False, False, False, False, False, True, True, False, False, False, False, False]},
                     {"title.text": f"{track_name} — Distance Dual Axis", "xaxis.title.text": "Distance (m)", "yaxis.title.text": "Speed (km/h)", "yaxis.scaleanchor": None, "yaxis2.visible": True}
                 ]),
             ],
@@ -619,9 +629,9 @@ class PlotTrackMaps:
             xaxis_title="x",
             yaxis_title="y",
             yaxis=dict(scaleanchor="x", scaleratio=1),
-            scene=dict(aspectmode='data', zaxis_title=actual_z_col.capitalize()), 
+            scene=dict(aspectmode='data', zaxis_title=actual_z_col.capitalize()),
             legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="right", x=1),
-            margin=dict(t=120)
+            margin=dict(t=120, b=0, l=0, r=0)
         )
         fig.update_yaxes(title_text=f"Curvature ({curv_col})", secondary_y=True)
         fig.layout.yaxis2.visible = False
