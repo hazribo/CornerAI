@@ -526,6 +526,7 @@ class PlotTrackMaps:
         throttle_threshold: float = 0.4,
         bin_m: float = 5.0,
         z_col: str = "z",
+        z_exaggeration: float = 0.3,
     ) -> Path:
         from plotly.subplots import make_subplots
 
@@ -606,7 +607,6 @@ class PlotTrackMaps:
                     {"title.text": f"{track_name} — Car State", "xaxis.title.text": "x", "yaxis.title.text": "y", "yaxis.scaleanchor": "x", "yaxis2.visible": False}
                 ]),
                 dict(label="Car State Map (3D)", method="update", args=[
-                    # Turns on [9, 10, 11, 12, 13]
                     {"visible": [False, False, False, False, False, False, False, False, False, True, True, True, True, True]},
                     {"title.text": f"{track_name} — 3D Car State", "xaxis.title.text": "", "yaxis.title.text": "", "yaxis2.visible": False}
                 ]),
@@ -622,6 +622,10 @@ class PlotTrackMaps:
             direction="down", pad={"r": 10, "t": 10}, showactive=True, x=0.0, xanchor="left", y=1.2, yanchor="top"
         )]
 
+        x_span = agg["x"].max() - agg["x"].min()
+        y_span = agg["y"].max() - agg["y"].min()
+        max_span = max(x_span, y_span)
+
         fig.update_layout(
             title=f"{track_name} — Predicted Speed",
             template="plotly_white",
@@ -629,7 +633,18 @@ class PlotTrackMaps:
             xaxis_title="x",
             yaxis_title="y",
             yaxis=dict(scaleanchor="x", scaleratio=1),
-            scene=dict(aspectmode='data', zaxis_title=actual_z_col.capitalize()),
+            scene=dict(
+                aspectmode='manual',
+                aspectratio=dict(
+                    x=x_span / max_span, 
+                    y=y_span / max_span, 
+                    z=z_exaggeration 
+                ),
+                camera=dict(
+                    eye=dict(x=0.0, y=-1.5, z=1.2) 
+                ),
+                zaxis_title=actual_z_col.capitalize()
+            ),
             legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="right", x=1),
             margin=dict(t=120, b=0, l=0, r=0)
         )
