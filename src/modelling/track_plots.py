@@ -551,7 +551,7 @@ class PlotTrackMaps:
                 colorscale="Plasma", 
                 opacity=0.5,
                 showscale=True,
-                colorbar=dict(title="Gear", x=0.85)
+                colorbar=dict(title="Gear", x=0.85, len=0.5)
             ),
             customdata=np.c_[track_data],
             hovertemplate="<b>%{customdata[0]}</b><br>|Curvature|: %{x:.6f}<br>Speed: %{y:.1f} km/h<br>Input Force: %{z:.2f}<extra></extra>",
@@ -559,7 +559,7 @@ class PlotTrackMaps:
 
         fig.update_layout(
             title="Global Telemetry Constellation: Speed vs Curvature vs Physics Inputs (Monaco removed)",
-            template="plotly_dark", 
+            template="plotly_white", 
             scene=dict(
                 xaxis_title="|Curvature|",
                 yaxis_title="Speed (km/h)",
