@@ -584,6 +584,7 @@ class PlotTrackMaps:
         throttle_threshold: float = 0.4,
         bin_m: float = 5.0,
         z_col: str = "z",
+        z_exaggeration: float = 10.0,
     ) -> Path:
         from plotly.subplots import make_subplots
 
@@ -793,6 +794,16 @@ class PlotTrackMaps:
             direction="down", pad={"r": 10, "t": 10}, showactive=True, x=0.0, xanchor="left", y=1.2, yanchor="top"
         )]
 
+        x_span = agg["x"].max() - agg["x"].min()
+        y_span = agg["y"].max() - agg["y"].min()
+        z_span = agg["z_val"].max() - agg["z_val"].min()
+        if z_span == 0: 
+            z_span = 1.0
+
+        max_span = max(x_span, y_span)
+        true_z_ratio = z_span / max_span
+        dynamic_z_aspect = min(true_z_ratio * z_exaggeration, 0.4)
+
         fig.update_layout(
             title=f"{track_name} — Predicted Speed",
             template="plotly_white",
@@ -800,10 +811,23 @@ class PlotTrackMaps:
             xaxis_title="x",
             yaxis_title="y",
             yaxis=dict(scaleanchor="x", scaleratio=1),
-            scene=dict(aspectmode='data', zaxis_title=actual_z_col.capitalize()),
+            scene=dict(
+                domain=dict(x=[0.0, 0.001], y=[0.0, 0.001]),
+                aspectmode='manual',
+                aspectratio=dict(
+                    x=x_span / max_span, 
+                    y=y_span / max_span, 
+                    z=dynamic_z_aspect 
+                ),
+                camera=dict(
+                    eye=dict(x=0.0, y=-1.5, z=1.2) 
+                ),
+                zaxis_title=actual_z_col.capitalize()
+            ),
             legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="right", x=1),
             margin=dict(t=120, b=0, l=0, r=0)
         )
+        
         fig.update_yaxes(title_text=f"Curvature ({curv_col})", secondary_y=True)
         fig.layout.yaxis2.visible = False
 
