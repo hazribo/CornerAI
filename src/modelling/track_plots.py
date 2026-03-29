@@ -514,6 +514,64 @@ class PlotTrackMaps:
         out_path = out_dir / f"{track_name}_car_state_3d.html"
         pio.write_html(fig, file=str(out_path), auto_open=False, include_plotlyjs="cdn")
         return out_path
+    
+    @staticmethod
+    def plot_global_state_constellation(
+        laps: pd.DataFrame,
+        out_dir: Path,
+        speed_col: str = "speed",
+        curv_col: str = "c_smooth",
+    ) -> Path:
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        
+        df = laps.copy()
+        if df.empty:
+            return out_dir / "global_constellation.html"
+            
+        curvature_data = df[curv_col].abs().to_numpy()
+        speed_data = df[speed_col].to_numpy()
+        p_brake = df["p_brake_zone"].to_numpy() if "p_brake_zone" in df.columns else np.zeros(len(df))
+        p_throttle = df["p_throttle_zone"].to_numpy() if "p_throttle_zone" in df.columns else np.zeros(len(df))
+        accel_state = p_throttle - p_brake
+        
+        track_data = df["track"].to_numpy(dtype=str)
+        gear_data = laps["gear"].to_numpy()
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter3d(
+            x=curvature_data, 
+            y=speed_data, 
+            z=accel_state,
+            mode="markers", 
+            name="Global State Constellation", 
+            marker=dict(
+                size=2, 
+                color=gear_data,  
+                colorscale="Plasma", 
+                opacity=0.5,
+                showscale=True,
+                colorbar=dict(title="Gear", x=0.85)
+            ),
+            customdata=np.c_[track_data],
+            hovertemplate="<b>%{customdata[0]}</b><br>|Curvature|: %{x:.6f}<br>Speed: %{y:.1f} km/h<br>Input Force: %{z:.2f}<extra></extra>",
+        ))
+
+        fig.update_layout(
+            title="Global Telemetry Constellation: Speed vs Curvature vs Physics Inputs (Monaco removed)",
+            template="plotly_dark", 
+            scene=dict(
+                xaxis_title="|Curvature|",
+                yaxis_title="Speed (km/h)",
+                zaxis_title="P(Throttle) - P(Brake)",
+                aspectmode="cube" 
+            ),
+            margin=dict(l=0, r=0, b=0, t=50)
+        )
+
+        out_path = out_dir / "global_constellation.html"
+        pio.write_html(fig, file=str(out_path), auto_open=False, include_plotlyjs="cdn")
+        return out_path
 
     @staticmethod
     def plot_track_dashboard(
@@ -576,6 +634,55 @@ class PlotTrackMaps:
         b_data = agg.loc[b_mask]
         fig.add_trace(go.Scattergl(x=b_data["x"], y=b_data["y"], mode="markers", name="Brake", marker=dict(size=7, color="rgba(220,20,20,0.95)"), customdata=np.c_[b_data["cl_dist"], b_data["brake"], b_data["p_brake"]], hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>brake=%{customdata[1]:.3f} (p=%{customdata[2]:.3f})<extra></extra>", visible=False), secondary_y=False)
 
+        curvature_data = base_lap[curv_col].abs().to_numpy()
+        speed_data = base_lap[actual_speed_col].to_numpy()
+        gear_data = base_lap["gear"].to_numpy() if "gear" in base_lap.columns else speed_data
+        # Get brake/throttle data then combine for acceleration state:
+        brake_data = base_lap[p_brake_col].to_numpy()
+        throttle_data = base_lap[p_throttle_col].to_numpy()
+        accel_state = throttle_data - brake_data 
+
+        # 2D scatter trace:
+        fig.add_trace(go.Scattergl(
+            x=curvature_data, y=speed_data, mode="markers", 
+            name="Curvature correlation", 
+            marker=dict(size=5, color=gear_data, colorscale="Viridis", opacity=0.8, line=dict(width=0.4, color='white')),
+            customdata=np.c_[base_lap["distance"].to_numpy()],
+            hovertemplate="Distance: %{customdata[0]:.1f}m<br>|Curvature|: %{x:.6f}<br>Speed: %{y:.1f} km/h<extra></extra>",
+            visible=False
+        ), secondary_y=False)
+
+        # Speed vs Distance heatmap:
+        fig.add_trace(go.Scattergl(
+            x=base_lap["distance"].to_numpy(), y=speed_data, mode="markers",
+            name="Speed vs Dist (Curvature map)",
+            marker=dict(size=5, color=curvature_data, colorscale="Turbo", opacity=0.8, showscale=True, colorbar=dict(title="|c|")),
+            customdata=np.c_[curvature_data, gear_data],
+            hovertemplate="Distance: %{x:.1f}m<br>Speed: %{y:.1f} km/h<br>|Curvature|: %{customdata[0]:.6f}<br>Gear: %{customdata[1]}<extra></extra>",
+            visible=False
+        ), secondary_y=False)
+
+        # 3D scatter trace:
+        fig.add_trace(go.Scatter3d(
+            x=base_lap["x"], 
+            y=base_lap["y"], 
+            z=speed_data,
+            mode="markers+lines", 
+            name="Track Speed Profile", 
+            line=dict(color='rgba(150, 150, 150, 0.4)', width=2),
+            marker=dict(
+                size=4, 
+                color=curvature_data, 
+                colorscale="Turbo", 
+                opacity=0.9,
+                showscale=True, 
+                colorbar=dict(title="|Curvature|", x=0.85)
+            ),
+            customdata=np.c_[base_lap["distance"].to_numpy(), gear_data, curvature_data],
+            hovertemplate="Dist: %{customdata[0]:.1f}m<br>Speed: %{z:.1f} km/h<br>|Curvature|: %{customdata[2]:.6f}<br>Gear: %{customdata[1]}<extra></extra>",
+            visible=False
+        ))
+
         fig.add_trace(go.Scatter(x=base_lap["distance"], y=base_lap[curv_col], mode="lines", name=f"Curvature ({curv_col})", line=dict(color="red", width=2), visible=False), secondary_y=False)
         fig.add_trace(go.Scatter(x=base_lap["distance"], y=base_lap["speed"], mode="lines", name="Speed (km/h)", line=dict(color="blue", width=2), visible=False), secondary_y=False)
         fig.add_trace(go.Scatter(x=base_lap["distance"], y=base_lap[curv_col], mode="lines", name=f"Curvature ({curv_col})", line=dict(color="red", width=2), visible=False), secondary_y=True)
@@ -594,29 +701,93 @@ class PlotTrackMaps:
         fig.add_trace(go.Scatter3d(x=t_data["x"], y=t_data["y"], z=t_data["z_val"], mode="markers", name="Throttle (3D)", marker=dict(size=4, color="rgba(34,180,34,0.9)"), customdata=np.c_[t_data["cl_dist"], t_data["throttle"], t_data["p_throttle"]], hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>throttle=%{customdata[1]:.3f} (p=%{customdata[2]:.3f})<extra></extra>", visible=False))
         fig.add_trace(go.Scatter3d(x=b_data["x"], y=b_data["y"], z=b_data["z_val"], mode="markers", name="Brake (3D)", marker=dict(size=5, color="rgba(220,20,20,0.95)"), customdata=np.c_[b_data["cl_dist"], b_data["brake"], b_data["p_brake"]], hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>brake=%{customdata[1]:.3f} (p=%{customdata[2]:.3f})<extra></extra>", visible=False))
 
+        fig.add_trace(go.Scatter3d(
+            x=curvature_data, 
+            y=speed_data, 
+            z=accel_state,
+            mode="markers", 
+            name="State Constellation", 
+            marker=dict(
+                size=3, 
+                color=base_lap[actual_speed_col], 
+                colorscale="Plasma", 
+                opacity=0.6,
+                showscale=True,
+                colorbar=dict(title="Speed", x=0.85)
+            ),
+            customdata=np.c_[base_lap["distance"].to_numpy(), gear_data],
+            hovertemplate="Curvature (|c|): %{x:.6f}<br>Speed: %{y:.1f} km/h<br>Input Force: %{z:.2f}<br>Distance: %{customdata[0]:.1f}m<extra></extra>",
+            visible=False
+        ))
+
+        # Define exactly which traces are visible for each plot/button:
+        def traces(*idx): return [i in idx for i in range(18)]
+
         updatemenus = [dict(
             active=0,
             buttons=[
                 dict(label="Predicted Speed Map", method="update", args=[
-                    {"visible": [True, True, False, False, False, False, False, False, False, False, False, False, False, False]},
-                    {"title.text": f"{track_name} — Predicted Speed", "xaxis.title.text": "x", "yaxis.title.text": "y", "yaxis.scaleanchor": "x", "yaxis2.visible": False}
+                    {"visible": traces(0, 1)}, 
+                    {"title.text": f"{track_name} — Predicted Speed", "xaxis.title.text": "x", "yaxis.title.text": "y", "yaxis.scaleanchor": "x", "yaxis.scaleratio": 1, "yaxis2.visible": False, "scene.domain.x": [0.0, 0.001], "scene.domain.y": [0.0, 0.001]}
                 ]),
                 dict(label="Car State Map", method="update", args=[
-                    {"visible": [False, False, True, True, True, True, False, False, False, False, False, False, False, False]},
-                    {"title.text": f"{track_name} — Car State", "xaxis.title.text": "x", "yaxis.title.text": "y", "yaxis.scaleanchor": "x", "yaxis2.visible": False}
+                    {"visible": traces(2, 3, 4, 5)},
+                    {"title.text": f"{track_name} — Car State", "xaxis.title.text": "x", "yaxis.title.text": "y", "yaxis.scaleanchor": "x", "yaxis.scaleratio": 1, "yaxis2.visible": False, "scene.domain.x": [0.0, 0.001], "scene.domain.y": [0.0, 0.001]}
                 ]),
                 dict(label="Car State Map (3D)", method="update", args=[
-                    # Turns on [9, 10, 11, 12, 13]
-                    {"visible": [False, False, False, False, False, False, False, False, False, True, True, True, True, True]},
-                    {"title.text": f"{track_name} — 3D Car State", "xaxis.title.text": "", "yaxis.title.text": "", "yaxis2.visible": False}
+                    {"visible": traces(12, 13, 14, 15, 16)},
+                    {"title.text": f"{track_name} — 3D Car State", "scene.domain.x": [0.0, 1.0], "scene.domain.y": [0.0, 1.0], "yaxis2.visible": False}
                 ]),
                 dict(label="Curvature over Distance", method="update", args=[
-                    {"visible": [False, False, False, False, False, False, True, False, False, False, False, False, False, False]},
-                    {"title.text": f"{track_name} — Curvature over Distance", "xaxis.title.text": "Distance (m)", "yaxis.title.text": f"Curvature ({curv_col})", "yaxis.scaleanchor": None, "yaxis2.visible": False}
+                    {"visible": traces(9)},
+                    {"title.text": f"{track_name} — Curvature over Distance", "xaxis.title.text": "Distance (m)", "yaxis.title.text": f"Curvature ({curv_col})", "yaxis.scaleanchor": None, "yaxis2.visible": False, "scene.domain.x": [0.0, 0.001], "scene.domain.y": [0.0, 0.001], "xaxis.visible": True, "yaxis.visible": True}
                 ]),
                 dict(label="Dual Axis (Dist)", method="update", args=[
-                    {"visible": [False, False, False, False, False, False, False, True, True, False, False, False, False, False]},
-                    {"title.text": f"{track_name} — Distance Dual Axis", "xaxis.title.text": "Distance (m)", "yaxis.title.text": "Speed (km/h)", "yaxis.scaleanchor": None, "yaxis2.visible": True}
+                    {"visible": traces(10, 11)},
+                    {"title.text": f"{track_name} — Distance Dual Axis", "xaxis.title.text": "Distance (m)", "yaxis.title.text": "Speed (km/h)", "yaxis.scaleanchor": None, "yaxis2.visible": True, "scene.domain.x": [0.0, 0.001], "scene.domain.y": [0.0, 0.001], "xaxis.visible": True, "yaxis.visible": True}
+                ]),
+                dict(label="Curvature vs Speed (2D)", method="update", args=[
+                    {"visible": traces(6)},
+                    {
+                        "title.text": f"{track_name} — Scatter Plot: Curvature vs Speed", 
+                        "xaxis.title.text": "Absolute Curvature (|c|)", "yaxis.title.text": "Speed (km/h)", 
+                        "yaxis.scaleanchor": None, "yaxis.scaleratio": None, "yaxis2.visible": False,
+                        "xaxis.visible": True, "yaxis.visible": True, "xaxis.autorange": True, "yaxis.autorange": True,
+                        "scene.domain.x": [0.0, 0.001], "scene.domain.y": [0.0, 0.001]
+                    }
+                ]),
+                dict(label="Speed vs Dist (Heatmap)", method="update", args=[
+                    {"visible": traces(7)},
+                    {
+                        "title.text": f"{track_name} — Speed vs Distance (Colored by Curvature)", 
+                        "xaxis.title.text": "Distance (m)", "yaxis.title.text": "Speed (km/h)", 
+                        "yaxis.scaleanchor": None, "yaxis.scaleratio": None, "yaxis2.visible": False,
+                        "xaxis.visible": True, "yaxis.visible": True, "xaxis.autorange": True, "yaxis.autorange": True,
+                        "scene.domain.x": [0.0, 0.001], "scene.domain.y": [0.0, 0.001]
+                    }
+                ]),
+                dict(label="3D Speed Elevation", method="update", args=[
+                    {"visible": traces(8)},
+                    {
+                        "title.text": f"{track_name} — 3D Speed Elevation Map", 
+                        "scene.xaxis.title.text": "Track X", "scene.yaxis.title.text": "Track Y", "scene.zaxis.title.text": "Speed (km/h)",
+                        "scene.camera": dict(eye=dict(x=1.5, y=-1.5, z=1.2) 
+                        ),
+                        "scene.domain.x": [0.0, 1.0], "scene.domain.y": [0.0, 1.0], 
+                        "xaxis.visible": False, "yaxis.visible": False,             
+                        "yaxis2.visible": False
+                    }
+                ]),
+                dict(label="Speed vs Curvature vs Inputs (3D)", method="update", args=[
+                    {"visible": traces(17)},
+                    {
+                        "title.text": f"{track_name} — Speed vs Curvature vs (Throttle-Brake)", 
+                        "scene.xaxis.title.text": "|Curvature|", "scene.yaxis.title.text": "Speed (km/h)", "scene.zaxis.title.text": "Input (Brake -1 to Throttle +1)",
+                        "scene.camera": dict(eye=dict(x=1.5, y=1.5, z=0.5)),
+                        "scene.domain.x": [0.0, 1.0], "scene.domain.y": [0.0, 1.0], 
+                        "xaxis.visible": False, "yaxis.visible": False, "yaxis2.visible": False,
+                        "scene.aspectmode": "cube"
+                    }
                 ]),
             ],
             direction="down", pad={"r": 10, "t": 10}, showactive=True, x=0.0, xanchor="left", y=1.2, yanchor="top"
