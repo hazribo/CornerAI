@@ -553,4 +553,17 @@ if __name__ == "__main__":
             out_dir=MODEL_OUTPUT_DIR,
             curv_col="c_signed_smooth" # used signed curvature for plots
         )
+
+    ### Get global constellation map:
+    all_laps = model.predict_probability(fast_laps.copy())
+    all_laps = all_laps[~all_laps["track"].str.contains("monaco", case=False, na=False)] # remove monaco - outlier
+    #all_laps = all_laps[~all_laps["track"].str.contains("shanghai", case=False, na=False)]
+    #all_laps = all_laps[~all_laps["track"].str.contains("montreal", case=False, na=False)]
+    #all_laps = all_laps[~all_laps["track"].str.contains("suzuka", case=False, na=False)]
+    PlotTrackMaps.plot_global_state_constellation(
+        laps=all_laps,
+        out_dir=MODEL_OUTPUT_DIR,
+        speed_col="speed",
+        curv_col="c_smooth",
+    )
     print(f"Saved plots/graphs to {MODEL_OUTPUT_DIR}.")
