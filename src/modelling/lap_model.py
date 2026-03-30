@@ -4,7 +4,7 @@ import pandas as pd
 import time
 # file imports:
 from track_plots import PlotTrackMaps
-from model_utils import Curvature, build_centreline, project_to_centreline, build_track_ground_truth
+from model_utils import Curvature, build_centreline, project_to_centreline, build_track_ground_truth, add_should_throttle, add_should_brake
 # model imports:
 from sklearn.model_selection import GroupShuffleSplit
 from sklearn.ensemble import RandomForestClassifier
@@ -357,16 +357,27 @@ if __name__ == "__main__":
 
     scored = model.predict_probability(df)
 
-    plot_paths = PlotTrackMaps.plot_braking_zones_by_track(
-        scored,
-        out_dir=MODEL_OUTPUT_DIR,
-        prob_threshold=0.5,
-        zone_col="p_brake_zone",
-    )
-    dist_paths = PlotTrackMaps.plot_curvature_over_distance(
-        scored,
-        track="Dutch_Grand_Prix",
-        out_dir=MODEL_OUTPUT_DIR,
-        lap_id=None,
-    )
-    print(f"saved {len(plot_paths)} plots and 1 graph to {MODEL_OUTPUT_DIR}")
+    cl_by_track: dict[str, pd.DataFrame] = {}
+    gt_by_track: dict[str, pd.DataFrame] = {}
+    
+    for track_name, track_df in scored.groupby("track", sort=False):  
+        cl = build_centreline(track_df, track=str(track_name), bin_m=5.0)
+        gt = build_track_ground_truth(track_df, track=str(track_name), cl=cl, bin_m=5.0)
+        
+        cl_by_track[str(track_name)] = cl
+        gt_by_track[str(track_name)] = gt
+
+    for t, gt in gt_by_track.items():
+        gt.to_csv(MODEL_OUTPUT_DIR / f"{t}_ground_truth.csv")
+
+        cl = cl_by_track[t]
+        current_track_laps = scored[scored["track"] == t].copy()
+        current_track_laps = project_to_centreline(current_track_laps, cl)
+        current_track_laps = model.predict_probability(current_track_laps) 
+
+        PlotTrackMaps.plot_track_dashboard(
+            current_track_laps,
+            track_name=t,
+            out_dir=MODEL_OUTPUT_DIR,
+            curv_col="c_signed_smooth" # used signed curvature for plots
+        )
