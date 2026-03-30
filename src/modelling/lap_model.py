@@ -256,13 +256,13 @@ class RandomForestModel:
     @staticmethod
     def rf_model(seed: int = 19):
         return RandomForestClassifier(
-            n_estimators = 50,
-            max_depth = 12,
-            min_samples_leaf = 50,
-            min_samples_split = 100,
-            max_features = "log2",
+            n_estimators = 100,      
+            max_depth = 18,        
+            min_samples_leaf = 5,  
+            min_samples_split = 10,
+            max_features = "sqrt",   
             bootstrap = True,
-            max_samples = 0.4,
+            max_samples = 0.8,     
             n_jobs = -1,
             class_weight = "balanced_subsample",
             random_state = seed,

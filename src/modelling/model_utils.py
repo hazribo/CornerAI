@@ -199,7 +199,12 @@ class Curvature:
                 out[col] = 0.0
 
         grouped_data = out.groupby(["track", "year", "lap_id"], sort=False)
-        for (_, _, _), lap_df in grouped_data:
+        total_laps = len(grouped_data)
+        lap_count = 0
+        
+        for (track_name, yr, lid), lap_df in grouped_data:
+            lap_count += 1
+            print(f"Adding curvature to {track_name} ({yr}_{lid}) [{lap_count}/{total_laps}]")
             idx = lap_df.index.to_numpy()
             distance = lap_df["distance"].to_numpy(dtype=float)
 
