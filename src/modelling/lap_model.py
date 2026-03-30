@@ -2,8 +2,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import time
-# plot imports:
+# file imports:
 from track_plots import PlotTrackMaps
+from model_utils import Curvature, build_centreline, project_to_centreline, build_track_ground_truth, add_should_throttle, add_should_brake
 # model imports:
 from sklearn.model_selection import GroupShuffleSplit
 from sklearn.ensemble import RandomForestClassifier
@@ -24,8 +25,12 @@ TRACK_ALIASES = {
 }
 
 # feature columns and label details for RF model:
+N_COLS_DEFAULT = 4
 FEATURE_COLS = ["time", "distance", "x", "y", "z", "speed", "throttle", "brake", "rpm", "gear", "drs",
-                "c", "cb1", "ca1", "c_smooth"] # curvature, curvature before 100m, curvature after 100m + smoothed curvature
+                "c", "c_smooth", # curvature + smoothed curvature
+                *[f"cb{i}" for i in range(1, N_COLS_DEFAULT + 1)],
+                *[f"ca{i}" for i in range(1, N_COLS_DEFAULT + 1)]]
+
 LABELS = {
     "brake_threshold": 0.1,
     "brake_lift_min": 0.05,
@@ -46,7 +51,7 @@ def load_build_cache(
         return pd.read_pickle(cache_path)
 
     df = load_historical_laps()
-    df = add_curvature_features(df)
+    df = Curvature.add_curv_cols(df, n_cols=N_COLS_DEFAULT, dist_interval=50) 
     df = add_labels(df)
 
     df.to_pickle(cache_path)
@@ -133,102 +138,6 @@ def add_labels(df: pd.DataFrame):
 
         out.loc[idx, "y_brake_zone"] = brake_zone
         out.loc[idx, "y_throttle_zone"] = throttle_zone
-
-    return out
-
-def get_curvature(x, y):
-    x = np.asarray(x, dtype=float)
-    y = np.asarray(y, dtype=float)
-
-    n = len(x)
-    kappa = np.zeros(n, dtype=float)
-    if n < 3:
-        return kappa
-
-    for i in range(1, n - 1):
-        A = (x[i - 1], y[i - 1])
-        B = (x[i], y[i])
-        C = (x[i + 1], y[i + 1])
-        kappa[i] = calc_curvature(A, B, C)
-
-    kappa[0] = kappa[1]
-    kappa[-1] = kappa[-2]
-    return kappa
-
-def calc_curvature(A, B, C):
-    Ax, Ay = float(A[0]), float(A[1])
-    Bx, By = float(B[0]), float(B[1])
-    Cx, Cy = float(C[0]), float(C[1])
-
-    if not (np.isfinite(Ax) and np.isfinite(Ay) and np.isfinite(Bx) and np.isfinite(By) and np.isfinite(Cx) and np.isfinite(Cy)):
-        return 0.0
-
-    v1 = np.array([Bx - Ax, By - Ay], dtype=float)
-    v2 = np.array([Cx - Bx, Cy - By], dtype=float)
-
-    n1 = float(np.linalg.norm(v1))
-    n2 = float(np.linalg.norm(v2))
-    ds = (n1 + n2) / 2.0
-    if not np.isfinite(ds) or ds <= 1e-9:
-        return 0.0
-
-    angle1 = float(np.arctan2(v1[1], v1[0]))
-    angle2 = float(np.arctan2(v2[1], v2[0]))
-
-    d_theta = (angle2 - angle1 + np.pi) % (2 * np.pi) - np.pi
-    if not np.isfinite(d_theta):
-        return 0.0
-
-    return float(d_theta / ds)
-
-def curvature_context(distance_m, kappa, window_m=100.0):
-    d = np.asarray(distance_m, dtype=float)
-    k = np.abs(np.asarray(kappa, dtype=float))
-
-    n = len(d)
-    c = k.copy()
-    cb1 = np.zeros(n, dtype=float)
-    ca1 = np.zeros(n, dtype=float)
-
-    for i in range(n):
-        left = np.searchsorted(d, d[i] - float(window_m), side="left")
-        right = np.searchsorted(d, d[i] + float(window_m), side="right")
-
-        if i > left:
-            cb1[i] = float(np.mean(k[left:i]))
-        if right > i + 1:
-            ca1[i] = float(np.mean(k[i + 1:right]))
-
-    return c, cb1, ca1
-
-def add_curvature_features(df):
-    out = df.sort_values(["track", "year", "lap_id", "distance"]).copy()
-    for col in ["c", "cb1", "ca1", "c_smooth"]:
-        if col not in out.columns:
-            out[col] = 0.0
-
-    grouped_data = out.groupby(["track", "year", "lap_id"], sort=False)
-    for (_, _, _), lap_df in grouped_data:
-        idx = lap_df.index.to_numpy()
-
-        distance = lap_df["distance"].to_numpy(dtype=float)
-
-        # Smooth x/y to reduce noise:
-        x_raw = lap_df["x"].to_numpy(dtype=float)
-        y_raw = lap_df["y"].to_numpy(dtype=float)
-        x = pd.Series(x_raw).rolling(window=7, center=True, min_periods=1).median().rolling(window=15, center=True, min_periods=1).mean().to_numpy(dtype=float)
-        y = pd.Series(y_raw).rolling(window=7, center=True, min_periods=1).median().rolling(window=15, center=True, min_periods=1).mean().to_numpy(dtype=float)
-
-        kappa = get_curvature(x, y)
-        c, cb1, ca1 = curvature_context(distance, kappa, window_m=100.0)
-
-        base = (0.50 * c) + (0.25 * cb1) + (0.25 * ca1)
-        c_smooth = pd.Series(base).rolling(window=11, center=True, min_periods=1).median().rolling(window=31, center=True, min_periods=1).mean().to_numpy(dtype=float)
-
-        out.loc[idx, "c"] = c
-        out.loc[idx, "cb1"] = cb1
-        out.loc[idx, "ca1"] = ca1
-        out.loc[idx, "c_smooth"] = c_smooth
 
     return out
 
@@ -448,16 +357,27 @@ if __name__ == "__main__":
 
     scored = model.predict_probability(df)
 
-    plot_paths = PlotTrackMaps.plot_braking_zones_by_track(
-        scored,
-        out_dir=MODEL_OUTPUT_DIR,
-        prob_threshold=0.5,
-        zone_col="p_brake_zone",
-    )
-    dist_paths = PlotTrackMaps.plot_curvature_over_distance(
-        scored,
-        track="Dutch_Grand_Prix",
-        out_dir=MODEL_OUTPUT_DIR,
-        lap_id=None,
-    )
-    print(f"saved {len(plot_paths)} plots and 1 graph to {MODEL_OUTPUT_DIR}")
+    cl_by_track: dict[str, pd.DataFrame] = {}
+    gt_by_track: dict[str, pd.DataFrame] = {}
+    
+    for track_name, track_df in scored.groupby("track", sort=False):  
+        cl = build_centreline(track_df, track=str(track_name), bin_m=5.0)
+        gt = build_track_ground_truth(track_df, track=str(track_name), cl=cl, bin_m=5.0)
+        
+        cl_by_track[str(track_name)] = cl
+        gt_by_track[str(track_name)] = gt
+
+    for t, gt in gt_by_track.items():
+        gt.to_csv(MODEL_OUTPUT_DIR / f"{t}_ground_truth.csv")
+
+        cl = cl_by_track[t]
+        current_track_laps = scored[scored["track"] == t].copy()
+        current_track_laps = project_to_centreline(current_track_laps, cl)
+        current_track_laps = model.predict_probability(current_track_laps) 
+
+        PlotTrackMaps.plot_track_dashboard(
+            current_track_laps,
+            track_name=t,
+            out_dir=MODEL_OUTPUT_DIR,
+            curv_col="c_signed_smooth" # used signed curvature for plots
+        )
