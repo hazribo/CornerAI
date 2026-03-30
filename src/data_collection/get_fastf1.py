@@ -12,7 +12,8 @@ cache_dir = Path(__file__).resolve().parents[2] / "data" / "raw" / "historical"
 os.makedirs(cache_dir, exist_ok=True)
 ff1.Cache.enable_cache(cache_dir)
 
-YEARS = [2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025]
+# Only 2022-2025 data - same regulation set.
+YEARS = [2022, 2023, 2024, 2025]
 SESSION = "Q"
 
 for year in YEARS:
@@ -33,10 +34,16 @@ for year in YEARS:
                 continue
         try:
             quali = ff1.get_session(year, event.EventName, SESSION)
-            quali.load(laps=True)
+            quali.load(laps=True, telemetry=True, weather=True)
         except Exception as e:
             print(f"Skipping {year} {event.EventName}. Reason: {e}")
             continue
+
+        # Filter out all wet quali sessions:
+        if not quali.weather_data.empty:
+            if quali.weather_data['Rainfall'].any():
+                print(f"Skipping {year} {event.EventName} (Wet Session)")
+                continue
         
         try:
             print(f"Loaded {year} {event.EventName}.")
