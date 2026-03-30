@@ -21,7 +21,7 @@ def clean(filepath):
     df["speed"] = speed
     df["norm_speed"] = speed / max_speed
     # Normalise throttle, brake to 0-1:
-    df["throttle"] = df_raw["Throttle"].apply(lambda x: 1.0 if x > 95 else 0.0)
+    df["throttle"] = df_raw["Throttle"].astype(float) / 100.0
     df["brake"] = df_raw["Brake"].apply(lambda x: 1.0 if x == True or x == "True" else 0.0)
     df["gear"] = df_raw["nGear"]
     df["drs"] = df_raw["DRS"].apply(lambda x: 1.0 if x == 12 else 0.0)
