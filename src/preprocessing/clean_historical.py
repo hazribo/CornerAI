@@ -45,10 +45,10 @@ def clean(filepath):
         new_t = np.arange(float(df["time"].iloc[0]), float(df["time"].iloc[-1]) + 1e-9, dt, dtype=float)
         out = pd.DataFrame({"time": new_t})
 
-        base = df[["time","distance","x","y","z","speed","throttle","brake","rpm"]].copy()
+        base = df[["time","distance","x","y","z","speed","norm_speed","throttle","brake","rpm"]].copy()
         base = base.sort_values("time")
 
-        for c in ["distance","x","y","z","speed","throttle","brake","rpm"]:
+        for c in ["distance","x","y","z","speed","norm_speed","throttle","brake","rpm"]:
             out[c] = np.interp(new_t, base["time"].to_numpy(), base[c].to_numpy())
 
         disc = df[["time","gear","drs"]].sort_values("time")
