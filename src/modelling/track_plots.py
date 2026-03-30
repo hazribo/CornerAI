@@ -558,7 +558,7 @@ class PlotTrackMaps:
         ))
 
         fig.update_layout(
-            title="Global Telemetry Constellation: Speed vs Curvature vs Physics Inputs (Monaco removed)",
+            title=f"Global Telemetry Constellation: Speed vs Curvature vs Physics Inputs (Monaco removed) - {(len(df))} data points",
             template="plotly_white", 
             scene=dict(
                 xaxis_title="|Curvature|",

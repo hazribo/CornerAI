@@ -21,7 +21,7 @@ def clean(filepath):
     df["speed"] = speed
     df["norm_speed"] = speed / max_speed
     # Normalise throttle, brake to 0-1:
-    df["throttle"] = df_raw["Throttle"].apply(lambda x: 1.0 if x > 95 else 0.0)
+    df["throttle"] = df_raw["Throttle"].astype(float) / 100.0
     df["brake"] = df_raw["Brake"].apply(lambda x: 1.0 if x == True or x == "True" else 0.0)
     df["gear"] = df_raw["nGear"]
     df["drs"] = df_raw["DRS"].apply(lambda x: 1.0 if x == 12 else 0.0)
@@ -45,10 +45,10 @@ def clean(filepath):
         new_t = np.arange(float(df["time"].iloc[0]), float(df["time"].iloc[-1]) + 1e-9, dt, dtype=float)
         out = pd.DataFrame({"time": new_t})
 
-        base = df[["time","distance","x","y","z","speed","throttle","brake","rpm"]].copy()
+        base = df[["time","distance","x","y","z","speed","norm_speed","throttle","brake","rpm"]].copy()
         base = base.sort_values("time")
 
-        for c in ["distance","x","y","z","speed","throttle","brake","rpm"]:
+        for c in ["distance","x","y","z","speed","norm_speed","throttle","brake","rpm"]:
             out[c] = np.interp(new_t, base["time"].to_numpy(), base[c].to_numpy())
 
         disc = df[["time","gear","drs"]].sort_values("time")

@@ -9,7 +9,8 @@ cache_dir = "./data/raw/historical/"
 ff1.Cache.enable_cache(cache_dir)
 ff1.Cache.offline = True # can only use cached data
 
-YEARS = [2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025]
+# Only 2022-2025 data - same regulation set.
+YEARS = [2022, 2023, 2024, 2025]
 SESSION = "Q"
 
 # no try-except needed: only using data from cached files
