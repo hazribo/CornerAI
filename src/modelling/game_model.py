@@ -6,7 +6,7 @@ import re
 # other file imports:
 from track_plots import PlotTrackMaps
 from game_advice import build_references_from_gt, advice, write_advice
-from model_utils import Curvature, build_centreline, project_to_centreline, build_track_ground_truth
+from model_utils import Curvature, build_centreline, project_to_centreline, build_track_ground_truth, add_should_brake, add_should_throttle
 # model imports:
 from sklearn.model_selection import GroupShuffleSplit
 from sklearn.ensemble import RandomForestClassifier
@@ -133,54 +133,6 @@ def filter_fast_laps(df: pd.DataFrame, top_pct: float = 0.7) -> pd.DataFrame:
         n_keep = max(1, int(len(lap_times) * top_pct))
         fast_ids.update(lap_times.index[:n_keep])
     return df[df["lap_id"].isin(fast_ids)]
-
-def add_should_brake(
-    lap_df: pd.DataFrame,
-    gt: pd.DataFrame,
-    speed_margin: float = 0.03,
-    brake_prob_min: float = 0.5,
-) -> pd.DataFrame:
-    
-    if lap_df.empty or gt.empty:
-        out = lap_df.copy()
-        out["should_brake"] = 0
-        return out
-
-    out = pd.merge_asof(
-        lap_df.sort_values("cl_dist"),
-        gt[["cl_dist", "x_exp", "y_exp", "c_exp", "c_exp_ahead", "norm_speed_exp", "speed_exp", "p_brake_exp"]].sort_values("cl_dist"),
-        on="cl_dist",   # Use centreline distance instead of just distance
-        direction="nearest",
-    )
-
-    out["should_brake"] = (
-        (out["norm_speed"] > out["norm_speed_exp"] + float(speed_margin)) &
-        (out["p_brake_zone"] >= float(brake_prob_min))
-    ).astype(int)
-
-    return out
-
-def add_should_throttle(
-    lap_df: pd.DataFrame,
-    gt: pd.DataFrame,
-    throttle_prob_min: float = 0.5,
-) -> pd.DataFrame:
-    
-    if lap_df.empty or gt.empty:
-        out = lap_df.copy()
-        out["should_throttle"] = 0
-        return out
-
-    merge_cols = ["cl_dist"]
-    out = pd.merge_asof(
-        lap_df.sort_values("cl_dist"),
-        gt[merge_cols].sort_values("cl_dist"),
-        on="cl_dist",
-        direction="nearest",
-    )
-
-    out["should_throttle"] = (out["p_throttle_zone"] >= float(throttle_prob_min)).astype(int)
-    return out
 
 class RandomForestModel:
     def __init__(self):
