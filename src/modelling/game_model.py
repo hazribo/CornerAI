@@ -180,6 +180,7 @@ class RandomForestModel:
         training_df = laps.copy()
         bundle = RandomForestModel()
         bundle.feature_cols = list(FEATURE_COLS)
+        brake_accs, throttle_accs = [], []
 
         for track_name, track_df in training_df.groupby("track", sort=False):
             start_time = time.perf_counter()
@@ -207,6 +208,11 @@ class RandomForestModel:
                 "brake": brake_model,
                 "throttle": throttle_model,
             }
+            brake_accs.append(brake_acc)
+            throttle_accs.append(throttle_acc)
+
+        print(f"Average Brake Accuracy: {np.mean(brake_accs):.4f}")
+        print(f"Average Throttle Accuracy: {np.mean(throttle_accs):.4f}")
 
         return bundle
     
