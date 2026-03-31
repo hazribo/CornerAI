@@ -96,9 +96,9 @@ def get_advice(filename: Path, df: pd.DataFrame):
     write_advice(advice_df, advice_path, track_name=target_track, lap_id=filename)
     print(f"Saved advice to {advice_path}.")
 
-    # Generate plot comparison and also save to advice path:
-    PlotTrackMaps.plot_lap_speed_comparison(user_df=player_lap, gt_df=gt, track_name=str(target_track), out_dir=output_dir)
-    print(f"Saved lap comparison plot to {advice_path}.")
+    # Generate plot comparisons and also save to advice path:
+    PlotTrackMaps.plot_lap_comparison(user_df=player_lap, gt_df=gt, track_name=str(target_track), out_dir=output_dir)
+    print(f"Saved lap comparison plots to {advice_path}.")
 
 def save_lap_csv(filename, data_points):
     if not data_points:
