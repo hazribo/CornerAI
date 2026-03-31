@@ -574,6 +574,71 @@ class PlotTrackMaps:
         return out_path
 
     @staticmethod
+    def plot_lap_comparison(
+        user_df: pd.DataFrame,
+        gt_df: pd.DataFrame,
+        track_name: str,
+        out_dir: Path,
+        user_speed_col: str = "speed",
+        gt_speed_col: str = "speed_exp",
+    ) -> Path:
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        if user_df.empty or gt_df.empty:
+            raise ValueError(f"Missing data for track='{track_name}' in one or both dataframes.")
+            
+        fig = make_subplots(
+            rows=1, cols=2, 
+            subplot_titles=(f"User Lap", f"Expected Ground Truth"),
+            horizontal_spacing=0.1
+        )
+
+        def _get_speed_col(df, default_col):
+            if default_col in df.columns:
+                return default_col
+            elif "speed" in df.columns:
+                return "speed"
+            raise ValueError(f"Missing speed column in dataframe (tried {default_col} and 'speed')")
+
+        user_actual_col = _get_speed_col(user_df, user_speed_col)
+        gt_actual_col = _get_speed_col(gt_df, gt_speed_col)
+
+        fig.add_trace(
+            go.Scattergl(
+                x=user_df["x"], y=user_df["y"], mode="markers",
+                name="User Speed",
+                marker=dict(size=4, color=user_df[user_actual_col], colorscale="Turbo", showscale=True, colorbar=dict(title="km/h", x=0.45)),
+                customdata=np.c_[user_df["cl_dist"], user_df[user_actual_col]],
+                hovertemplate="dist: %{customdata[0]:.1f}m<br>speed: %{customdata[1]:.2f} km/h<extra></extra>"
+            ), row=1, col=1
+        )
+
+        fig.add_trace(
+            go.Scattergl(
+                x=gt_df["x_exp"], y=gt_df["y_exp"], mode="markers",
+                name="GT Speed",
+                marker=dict(size=4, color=gt_df[gt_actual_col], colorscale="Turbo", showscale=True, colorbar=dict(title="km/h", x=1.0)),
+                customdata=np.c_[gt_df["cl_dist"], gt_df[gt_actual_col]],
+                hovertemplate="dist: %{customdata[0]:.1f}m<br>speed: %{customdata[1]:.2f} km/h<extra></extra>"
+            ), row=1, col=2
+        )
+
+        fig.update_layout(
+            title=f"{track_name} — User vs Expected Comparison",
+            template="plotly_white",
+            legend=dict(orientation="h", yanchor="bottom", y=1.08, xanchor="right", x=1)
+        )
+        
+        fig.update_yaxes(scaleanchor="x", scaleratio=1, row=1, col=1)
+        fig.update_yaxes(scaleanchor="x2", scaleratio=1, row=1, col=2)
+
+        out_path = out_dir / f"{track_name}_lap_comparison.html"
+        pio.write_html(fig, file=str(out_path), auto_open=False, include_plotlyjs="cdn")
+        
+        return out_path
+
+    @staticmethod
     def plot_track_dashboard(
         laps: pd.DataFrame,
         track_name: str,
@@ -584,7 +649,7 @@ class PlotTrackMaps:
         throttle_threshold: float = 0.4,
         bin_m: float = 5.0,
         z_col: str = "z",
-        z_exaggeration: float = 10.0,
+        z_exaggeration: float = 4.0,
     ) -> Path:
         from plotly.subplots import make_subplots
 
@@ -698,7 +763,7 @@ class PlotTrackMaps:
             
         fig.add_trace(go.Scatter3d(x=x_struts, y=y_struts, z=z_struts, mode="lines", line=dict(color="rgba(0,0,0,0.1)", width=2), name="Supports", hoverinfo="skip", visible=False))
         fig.add_trace(go.Scatter3d(x=agg["x"], y=agg["y"], z=agg["z_val"], mode="lines", line=dict(color="rgba(0,0,0,0.3)", width=4), name="Centreline (3D)", hoverinfo="skip", visible=False))
-        fig.add_trace(go.Scatter3d(x=c_data["x"], y=c_data["y"], z=c_data["z_val"], mode="markers", name="Cornering (3D)", marker=dict(size=3, color="rgba(160,160,160,0.7)"), customdata=np.c_[c_data["cl_dist"], c_data["brake"], c_data["throttle"], c_data["p_brake"], c_data["p_throttle"]], hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>brake=%{customdata[1]:.3f} (p=%{customdata[3]:.3f})<br>throttle=%{customdata[2]:.3f} (p=%{customdata[4]:.3f})<extra></extra>", visible=False))
+        fig.add_trace(go.Scatter3d(x=c_data["x"], y=c_data["y"], z=c_data["z_val"], mode="markers", name="Cornering (3D)", marker=dict(size=3, color="rgba(160,160,160,1.0)"), customdata=np.c_[c_data["cl_dist"], c_data["brake"], c_data["throttle"], c_data["p_brake"], c_data["p_throttle"]], hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>brake=%{customdata[1]:.3f} (p=%{customdata[3]:.3f})<br>throttle=%{customdata[2]:.3f} (p=%{customdata[4]:.3f})<extra></extra>", visible=False))
         fig.add_trace(go.Scatter3d(x=t_data["x"], y=t_data["y"], z=t_data["z_val"], mode="markers", name="Throttle (3D)", marker=dict(size=4, color="rgba(34,180,34,0.9)"), customdata=np.c_[t_data["cl_dist"], t_data["throttle"], t_data["p_throttle"]], hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>throttle=%{customdata[1]:.3f} (p=%{customdata[2]:.3f})<extra></extra>", visible=False))
         fig.add_trace(go.Scatter3d(x=b_data["x"], y=b_data["y"], z=b_data["z_val"], mode="markers", name="Brake (3D)", marker=dict(size=5, color="rgba(220,20,20,0.95)"), customdata=np.c_[b_data["cl_dist"], b_data["brake"], b_data["p_brake"]], hovertemplate="cl_dist=%{customdata[0]:.1f}m<br>brake=%{customdata[1]:.3f} (p=%{customdata[2]:.3f})<extra></extra>", visible=False))
 
@@ -729,15 +794,15 @@ class PlotTrackMaps:
             buttons=[
                 dict(label="Predicted Speed Map", method="update", args=[
                     {"visible": traces(0, 1)}, 
-                    {"title.text": f"{track_name} — Predicted Speed", "xaxis.title.text": "x", "yaxis.title.text": "y", "yaxis.scaleanchor": "x", "yaxis.scaleratio": 1, "yaxis2.visible": False, "scene.domain.x": [0.0, 0.001], "scene.domain.y": [0.0, 0.001]}
+                    {"title.text": f"{track_name} — Predicted Speed", "xaxis.title.text": "x", "yaxis.title.text": "y", "yaxis.scaleanchor": "x", "yaxis.scaleratio": 1, "xaxis.visible": True, "yaxis.visible": True, "yaxis2.visible": False, "scene.domain.x": [0.0, 0.001], "scene.domain.y": [0.0, 0.001]}
                 ]),
                 dict(label="Car State Map", method="update", args=[
                     {"visible": traces(2, 3, 4, 5)},
-                    {"title.text": f"{track_name} — Car State", "xaxis.title.text": "x", "yaxis.title.text": "y", "yaxis.scaleanchor": "x", "yaxis.scaleratio": 1, "yaxis2.visible": False, "scene.domain.x": [0.0, 0.001], "scene.domain.y": [0.0, 0.001]}
+                    {"title.text": f"{track_name} — Car State", "xaxis.title.text": "x", "yaxis.title.text": "y", "yaxis.scaleanchor": "x", "yaxis.scaleratio": 1, "xaxis.visible": True, "yaxis.visible": True, "yaxis2.visible": False, "scene.domain.x": [0.0, 0.001], "scene.domain.y": [0.0, 0.001]}
                 ]),
                 dict(label="Car State Map (3D)", method="update", args=[
                     {"visible": traces(12, 13, 14, 15, 16)},
-                    {"title.text": f"{track_name} — 3D Car State", "scene.domain.x": [0.0, 1.0], "scene.domain.y": [0.0, 1.0], "yaxis2.visible": False}
+                    {"title.text": f"{track_name} — 3D Car State", "scene.domain.x": [0.0, 1.0], "scene.domain.y": [0.0, 1.0], "xaxis.visible": False, "yaxis.visible": False, "yaxis2.visible": False}
                 ]),
                 dict(label="Curvature over Distance", method="update", args=[
                     {"visible": traces(9)},

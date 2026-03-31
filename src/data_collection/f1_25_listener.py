@@ -11,6 +11,7 @@ sys.path.append(str(modelling_dir))
 try:
     from game_model import RandomForestModel, Curvature, project_to_centreline, add_should_brake, add_should_throttle # type: ignore
     from game_advice import build_references_from_gt, advice, write_advice # type: ignore
+    from track_plots import PlotTrackMaps # type: ignore
 except ImportError as e:
     print(f"Warning: {e}")
     
@@ -72,7 +73,7 @@ udp.bind((UDP_IP, UDP_PORT))
 print("Listening on " + UDP_IP + ":" + str(UDP_PORT))                            
 
 def get_advice(filename: Path, df: pd.DataFrame):
-    target_track = df["track"].iloc[0                                         ]
+    target_track = df["track"].iloc[0]
     target_lap_id = str(filename)
     gt_path = models_dir / f"{target_track}_ground_truth.csv"
 
@@ -93,7 +94,11 @@ def get_advice(filename: Path, df: pd.DataFrame):
     advice_df = advice(lap_df, ref_brake, ref_throttle, gt=gt)
     advice_path = output_dir / f"{target_lap_id}_advice.txt"
     write_advice(advice_df, advice_path, track_name=target_track, lap_id=filename)
-    print(f"Saved advice to {advice_path}")
+    print(f"Saved advice to {advice_path}.")
+
+    # Generate plot comparisons and also save to advice path:
+    PlotTrackMaps.plot_lap_comparison(user_df=player_lap, gt_df=gt, track_name=str(target_track), out_dir=output_dir)
+    print(f"Saved lap comparison plots to {advice_path}.")
 
 def save_lap_csv(filename, data_points):
     if not data_points:
