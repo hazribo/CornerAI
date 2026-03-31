@@ -214,3 +214,6 @@ data/processed/f1-25
 data/features
 data/corner_info
 data/
+
+# Remove powerpoints:
+*.pptx
