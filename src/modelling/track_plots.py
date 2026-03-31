@@ -574,6 +574,71 @@ class PlotTrackMaps:
         return out_path
 
     @staticmethod
+    def plot_lap_comparison(
+        user_df: pd.DataFrame,
+        gt_df: pd.DataFrame,
+        track_name: str,
+        out_dir: Path,
+        user_speed_col: str = "speed",
+        gt_speed_col: str = "speed_exp",
+    ) -> Path:
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        if user_df.empty or gt_df.empty:
+            raise ValueError(f"Missing data for track='{track_name}' in one or both dataframes.")
+            
+        fig = make_subplots(
+            rows=1, cols=2, 
+            subplot_titles=(f"User Lap", f"Expected Ground Truth"),
+            horizontal_spacing=0.1
+        )
+
+        def _get_speed_col(df, default_col):
+            if default_col in df.columns:
+                return default_col
+            elif "speed" in df.columns:
+                return "speed"
+            raise ValueError(f"Missing speed column in dataframe (tried {default_col} and 'speed')")
+
+        user_actual_col = _get_speed_col(user_df, user_speed_col)
+        gt_actual_col = _get_speed_col(gt_df, gt_speed_col)
+
+        fig.add_trace(
+            go.Scattergl(
+                x=user_df["x"], y=user_df["y"], mode="markers",
+                name="User Speed",
+                marker=dict(size=4, color=user_df[user_actual_col], colorscale="Turbo", showscale=True, colorbar=dict(title="km/h", x=0.45)),
+                customdata=np.c_[user_df["cl_dist"], user_df[user_actual_col]],
+                hovertemplate="dist: %{customdata[0]:.1f}m<br>speed: %{customdata[1]:.2f} km/h<extra></extra>"
+            ), row=1, col=1
+        )
+
+        fig.add_trace(
+            go.Scattergl(
+                x=gt_df["x_exp"], y=gt_df["y_exp"], mode="markers",
+                name="GT Speed",
+                marker=dict(size=4, color=gt_df[gt_actual_col], colorscale="Turbo", showscale=True, colorbar=dict(title="km/h", x=1.0)),
+                customdata=np.c_[gt_df["cl_dist"], gt_df[gt_actual_col]],
+                hovertemplate="dist: %{customdata[0]:.1f}m<br>speed: %{customdata[1]:.2f} km/h<extra></extra>"
+            ), row=1, col=2
+        )
+
+        fig.update_layout(
+            title=f"{track_name} — User vs Expected Comparison",
+            template="plotly_white",
+            legend=dict(orientation="h", yanchor="bottom", y=1.08, xanchor="right", x=1)
+        )
+        
+        fig.update_yaxes(scaleanchor="x", scaleratio=1, row=1, col=1)
+        fig.update_yaxes(scaleanchor="x2", scaleratio=1, row=1, col=2)
+
+        out_path = out_dir / f"{track_name}_lap_comparison.html"
+        pio.write_html(fig, file=str(out_path), auto_open=False, include_plotlyjs="cdn")
+        
+        return out_path
+
+    @staticmethod
     def plot_track_dashboard(
         laps: pd.DataFrame,
         track_name: str,
