@@ -154,19 +154,16 @@ class UDPListener(threading.Thread):
         self.gt_distances = np.array([])
         self.gt_speeds = np.array([])
         
-        # Make your global variables instance variables here
         self.current_lap = 0
         self.current_telemetry = {}
         self.current_track_id = -1
         self.recording = False
         
-        # Keep your existing socket setup
         self.udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.udp.bind((UDP_IP, UDP_PORT))
         print("Listening on " + UDP_IP + ":" + str(UDP_PORT))
         
     def load_ground_truth(self, track_name):
-        """Load the ground truth CSV once when track is identified"""
         gt_path = models_dir / f"{track_name}_ground_truth.csv"
         if gt_path.exists():
             self.gt_df = pd.read_csv(gt_path)
@@ -175,8 +172,6 @@ class UDPListener(threading.Thread):
             print(f"Loaded ground truth for {track_name}")
 
     def run(self):
-        # Move your ENTIRE while True: loop here.
-        # Ensure you change global vars to self.vars (e.g. self.current_lap)
         while True:
             data, addr = self.udp.recvfrom(4096)
             
