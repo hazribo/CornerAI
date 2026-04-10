@@ -60,92 +60,7 @@ if model_path.exists():
         model = RandomForestModel.load_model(model_path)
         print(f"Loading model from {model_path}.")
     except FileExistsError as e:
-        print(f"Warning: {e}")
-
-current_lap = 0
-lap_data = []
-session_dir = None
-recording = False
-last_lap_distance = 0.0
-session_time = 0.0
-lap_start_time = 0.0
-current_sector = 1
-current_telemetry = {}
-current_track_id = -1
-
-udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-udp.bind((UDP_IP, UDP_PORT))
-print("Listening on " + UDP_IP + ":" + str(UDP_PORT))                            
-
-def get_advice(filename: Path, df: pd.DataFrame):
-    target_track = df["track"].iloc[0]
-    target_lap_id = str(filename)
-    gt_path = models_dir / f"{target_track}_ground_truth.csv"
-
-    gt = pd.read_csv(gt_path)
-    ref_brake = build_references_from_gt(gt, mode="brake")
-    ref_throttle = build_references_from_gt(gt, mode="throttle")
-
-    player_lap = pd.read_csv(filename)
-    player_lap = Curvature.add_curv_cols(df, n_cols=4)
-    player_lap = model.predict_probability(player_lap)
-    # Project player's coordinates to the nearest centreline point for cl_dist:
-    cl = gt[["x_exp", "y_exp", "cl_dist"]].rename(columns={"x_exp": "x", "y_exp": "y"})
-    player_lap = project_to_centreline(player_lap, cl)
-
-    lap_df = add_should_brake(player_lap, gt)
-    lap_df = add_should_throttle(player_lap, gt).sort_values("cl_dist")
-
-    advice_df = advice(lap_df, ref_brake, ref_throttle, gt=gt)
-    advice_path = output_dir / f"{target_lap_id}_advice.txt"
-    write_advice(advice_df, advice_path, track_name=target_track, lap_id=filename)
-    print(f"Saved advice to {advice_path}.")
-
-    # Generate plot comparisons and also save to advice path:
-    PlotTrackMaps.plot_lap_comparison(user_df=player_lap, gt_df=gt, track_name=str(target_track), out_dir=output_dir)
-    print(f"Saved lap comparison plots to {advice_path}.")
-
-def save_lap_csv(filename, data_points):
-    if not data_points:
-        return
-    
-    df_raw = pd.DataFrame(data_points)
-    df = pd.DataFrame()
-
-    df["distance"] = df_raw["lap_distance"]
-    df["x"] = df_raw["z_pos"] # swap x and z
-    df["y"] = df_raw["x_pos"] # swap y and z (x)
-    df["z"] = df_raw["y_pos"]
-    # Normalise speed to 0-1:
-    speed = pd.to_numeric(df_raw["speed"], errors="coerce")
-    max_speed = speed.max(skipna=True)
-    df["speed"] = speed
-    df["norm_speed"] = speed / max_speed
-    # Normalise throttle, brake, steering to 0-1:
-    df["throttle"] = df_raw["throttle"].astype(float)
-    df["brake"] = df_raw["brake"].astype(float)
-
-    #df["steer"] = df_raw["steer [%]"].astype(float) / 100.0
-    # uncomment at a later date if steering info can be gathered from ff1.
-
-    df["gear"] = df_raw["gear"]
-    df["drs"] = df_raw["drs"]
-    df["rpm"] = df_raw["rpm"]
-    df["time"] = df_raw["laptime"]
-    
-    df = df.sort_values("distance").reset_index(drop=True)
-    df["source"] = "f125"
-
-    df["track"] = TRACK_IDS.get(current_track_id)              
-    df["difficulty"] = "999" # placeholder for "player"
-    df["year"] = "2026" # placeholder - year value doesn't really matter for game telemetry
-    df["lap_id"] = filename
-
-    # Save telemetry to CSV:
-    df.to_csv(filename, index=False)
-    print(f"Saved {filename} with {len(df)} points")
-    # Get advice for this lap; will also be saved:
-    get_advice(filename, df)
+        print(f"Warning: {e}")                      
 
 class UDPListener(threading.Thread):
     def __init__(self):
@@ -154,11 +69,17 @@ class UDPListener(threading.Thread):
         self.gt_distances = np.array([])
         self.gt_speeds = np.array([])
         
+        # All required variables/values:
         self.current_lap = 0
+        self.lap_data = []
+        self.session_dir = None
+        self.recording = False
+        self.last_lap_distance = 0.0
+        self.lap_start_time = 0.0
+        self.current_sector = 1
         self.current_telemetry = {}
         self.current_track_id = -1
-        self.recording = False
-        
+        # Initialise UDP socket:
         self.udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.udp.bind((UDP_IP, UDP_PORT))
         print("Listening on " + UDP_IP + ":" + str(UDP_PORT))
@@ -191,14 +112,14 @@ class UDPListener(threading.Thread):
                 player_offset = HEADER_SIZE + (player_car_index * 60)
                 if len(data) >= player_offset + 60:
                     motion = struct.unpack("<ffffffhhhhhhffffff", data[player_offset:player_offset+60])
-                    current_telemetry.update({
+                    self.current_telemetry.update({
                         "x_pos": motion[0],
                         "y_pos": motion[1],
                         "z_pos": motion[2]
                     })
                     # Only record if lap distance is positive:
-                    if current_telemetry.get("lap_distance", -1.0) >= 0.0:
-                        lap_data.append(current_telemetry.copy())
+                    if self.current_telemetry.get("lap_distance", -1.0) >= 0.0:
+                        lap_data.append(self.current_telemetry.copy())
 
             # Session Data:
             if packet_id == 1 and recording:
@@ -252,13 +173,13 @@ class UDPListener(threading.Thread):
                     last_lap_distance = lap_distance
 
                     # Store lap context for merging with telemetry/motion
-                    current_telemetry["lap_distance"] = lap_distance
-                    current_telemetry["sector"] = sector
-                    current_telemetry["laptime"] = (session_time - lap_start_time) if lap_start_time else 0
+                    self.current_telemetry["lap_distance"] = lap_distance
+                    self.current_telemetry["sector"] = sector
+                    self.current_telemetry["laptime"] = (session_time - lap_start_time) if lap_start_time else 0
 
                     if lap_number > current_lap and current_lap > 0:
                         filename = session_dir / f"lap_{current_lap}.csv"
-                        save_lap_csv(filename, lap_data)
+                        self.save_lap_csv(filename, lap_data)
                         lap_data = []
                         lap_start_time = session_time
             
@@ -271,7 +192,7 @@ class UDPListener(threading.Thread):
                 player_offset = HEADER_SIZE + (player_car_index * 33)
                 if len(data) >= player_offset + 33:
                     tel = struct.unpack("<HfffBbHBBHHBBHfB", data[player_offset:player_offset+33])
-                    current_telemetry.update({
+                    self.current_telemetry.update({
                         "speed": tel[0],
                         "throttle": tel[1],
                         "steering_angle": tel[2],
@@ -280,3 +201,127 @@ class UDPListener(threading.Thread):
                         "rpm": tel[6],
                         "drs": tel[7]
                     })
+
+    def get_advice(self, filename: Path, df: pd.DataFrame):
+        target_track = df["track"].iloc[0]
+        target_lap_id = str(filename)
+        gt_path = models_dir / f"{target_track}_ground_truth.csv"
+
+        gt = pd.read_csv(gt_path)
+        ref_brake = build_references_from_gt(gt, mode="brake")
+        ref_throttle = build_references_from_gt(gt, mode="throttle")
+
+        player_lap = pd.read_csv(filename)
+        player_lap = Curvature.add_curv_cols(df, n_cols=4)
+        player_lap = model.predict_probability(player_lap)
+        # Project player's coordinates to the nearest centreline point for cl_dist:
+        cl = gt[["x_exp", "y_exp", "cl_dist"]].rename(columns={"x_exp": "x", "y_exp": "y"})
+        player_lap = project_to_centreline(player_lap, cl)
+
+        lap_df = add_should_brake(player_lap, gt)
+        lap_df = add_should_throttle(player_lap, gt).sort_values("cl_dist")
+
+        advice_df = advice(lap_df, ref_brake, ref_throttle, gt=gt)
+        advice_path = output_dir / f"{target_lap_id}_advice.txt"
+        write_advice(advice_df, advice_path, track_name=target_track, lap_id=filename)
+        print(f"Saved advice to {advice_path}.")
+
+        # Generate plot comparisons and also save to advice path:
+        PlotTrackMaps.plot_lap_comparison(user_df=player_lap, gt_df=gt, track_name=str(target_track), out_dir=output_dir)
+        print(f"Saved lap comparison plots to {advice_path}.")
+
+    def save_lap_csv(self, filename, data_points):
+        if not data_points:
+            return
+        
+        df_raw = pd.DataFrame(data_points)
+        df = pd.DataFrame()
+
+        df["distance"] = df_raw["lap_distance"]
+        df["x"] = df_raw["z_pos"] # swap x and z
+        df["y"] = df_raw["x_pos"] # swap y and z (x)
+        df["z"] = df_raw["y_pos"]
+        # Normalise speed to 0-1:
+        speed = pd.to_numeric(df_raw["speed"], errors="coerce")
+        max_speed = speed.max(skipna=True)
+        df["speed"] = speed
+        df["norm_speed"] = speed / max_speed
+        # Normalise throttle, brake, steering to 0-1:
+        df["throttle"] = df_raw["throttle"].astype(float)
+        df["brake"] = df_raw["brake"].astype(float)
+
+        #df["steer"] = df_raw["steer [%]"].astype(float) / 100.0
+        # uncomment at a later date if steering info can be gathered from ff1.
+
+        df["gear"] = df_raw["gear"]
+        df["drs"] = df_raw["drs"]
+        df["rpm"] = df_raw["rpm"]
+        df["time"] = df_raw["laptime"]
+        
+        df = df.sort_values("distance").reset_index(drop=True)
+        df["source"] = "f125"
+
+        df["track"] = TRACK_IDS.get(self.current_track_id)              
+        df["difficulty"] = "999" # placeholder for "player"
+        df["year"] = "2026" # placeholder - year value doesn't really matter for game telemetry
+        df["lap_id"] = filename
+
+        # Save telemetry to CSV:
+        df.to_csv(filename, index=False)
+        print(f"Saved {filename} with {len(df)} points")
+        # Get advice for this lap; will also be saved:
+        self.get_advice(filename, df)
+
+# Overlay polls UDPListener without interrupting it:
+class Overlay(QWidget):
+    def __init__(self, listener: UDPListener):
+        super().__init__()
+        self.listener = listener
+        self.setup_ui()
+        
+        # Refresh the UI at ~60fps (16ms):
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update_overlay)
+        self.timer.start(16)
+
+    def setup_ui(self):
+        # Make window transparent, frameless, and click-through:
+        self.setWindowFlags(
+            Qt.WindowType.WindowStaysOnTopHint | 
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowTransparentForInput
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setGeometry(100, 100, 400, 150) # x, y location + width, height
+        
+        self.layout = QVBoxLayout()
+        self.label = QLabel("Waiting for telemetry...", self)
+        self.label.setFont(QFont("Arial", 20, QFont.Weight.Bold))
+        self.label.setStyleSheet("color: white; background-color: rgba(0, 0, 0, 150); padding: 10px; border-radius: 10px;")
+        
+        self.layout.addWidget(self.label)
+        self.setLayout(self.layout)
+
+    def update_overlay(self):
+        tel = self.listener.current_telemetry
+        live_dist = tel.get("lap_distance", 0)
+        live_speed = tel.get("speed", 0)
+        
+        # Interpolate expected speed if GT data is loaded:
+        if len(self.listener.gt_distances) > 0 and live_dist > 0:
+            expected_speed = np.interp(live_dist, self.listener.gt_distances, self.listener.gt_speeds)
+            diff = live_speed - expected_speed
+            
+            color = "lime" if diff >= 0 else "red"
+            text = f"Spd: {live_speed:.0f} km/h | Tgt: {expected_speed:.0f} km/h\nDelta: <span style='color:{color}'>{diff:+.0f}</span>"
+            self.label.setText(text)
+        else:
+            self.label.setText(f"Speed: {live_speed:.0f} km/h (No Target)")
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    listener = UDPListener()
+    listener.start()
+    overlay = Overlay(listener)
+    overlay.show()
+    sys.exit(app.exec())
