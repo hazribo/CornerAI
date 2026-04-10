@@ -2,7 +2,12 @@ import socket
 import struct
 from datetime import datetime
 import pandas as pd
-
+# imports for real-time/overlay:
+import threading
+import numpy as np
+from PyQt6.QtWidgets import QApplication, QWidget, QLabel, QVBoxLayout
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QFont
 # Add src/modelling to path to load model/advice files:
 import sys
 from pathlib import Path
@@ -133,7 +138,7 @@ def save_lap_csv(filename, data_points):
 
     df["track"] = TRACK_IDS.get(current_track_id)              
     df["difficulty"] = "999" # placeholder for "player"
-    df["year"] = year
+    df["year"] = "2026" # placeholder - year value doesn't really matter for game telemetry
     df["lap_id"] = filename
 
     # Save telemetry to CSV:
@@ -142,106 +147,141 @@ def save_lap_csv(filename, data_points):
     # Get advice for this lap; will also be saved:
     get_advice(filename, df)
 
-while True:
-    data, addr = udp.recvfrom(4096)
-    
-    # Ignore any data of invalid size:
-    if len(data) < HEADER_SIZE:
-        continue
+class UDPListener(threading.Thread):
+    def __init__(self):
+        super().__init__(daemon=True)
+        self.gt_df = None
+        self.gt_distances = np.array([])
+        self.gt_speeds = np.array([])
+        
+        # Make your global variables instance variables here
+        self.current_lap = 0
+        self.current_telemetry = {}
+        self.current_track_id = -1
+        self.recording = False
+        
+        # Keep your existing socket setup
+        self.udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.udp.bind((UDP_IP, UDP_PORT))
+        print("Listening on " + UDP_IP + ":" + str(UDP_PORT))
+        
+    def load_ground_truth(self, track_name):
+        """Load the ground truth CSV once when track is identified"""
+        gt_path = models_dir / f"{track_name}_ground_truth.csv"
+        if gt_path.exists():
+            self.gt_df = pd.read_csv(gt_path)
+            self.gt_distances = self.gt_df["cl_dist"].values
+            self.gt_speeds = self.gt_df["speed"].values
+            print(f"Loaded ground truth for {track_name}")
 
-    # Get all necessary data from header:
-    header = struct.unpack("<HBBBBBQfIIBB", data[:HEADER_SIZE])
-    year = header[2] # for df["year"]
-    packet_id = header[5]
-    session_time = header[7]
-    player_car_index = header[10]
+    def run(self):
+        # Move your ENTIRE while True: loop here.
+        # Ensure you change global vars to self.vars (e.g. self.current_lap)
+        while True:
+            data, addr = self.udp.recvfrom(4096)
+            
+            # Ignore any data of invalid size:
+            if len(data) < HEADER_SIZE:
+                continue
 
-    # Motion Data:
-    if packet_id == 0 and recording:
-        player_offset = HEADER_SIZE + (player_car_index * 60)
-        if len(data) >= player_offset + 60:
-            motion = struct.unpack("<ffffffhhhhhhffffff", data[player_offset:player_offset+60])
-            current_telemetry.update({
-                "x_pos": motion[0],
-                "y_pos": motion[1],
-                "z_pos": motion[2]
-            })
-            # Only record if lap distance is positive:
-            if current_telemetry.get("lap_distance", -1.0) >= 0.0:
-                lap_data.append(current_telemetry.copy())
+            # Get all necessary data from header:
+            header = struct.unpack("<HBBBBBQfIIBB", data[:HEADER_SIZE])
+            year = header[2] # for df["year"]
+            packet_id = header[5]
+            session_time = header[7]
+            player_car_index = header[10]
 
-    # Session Data:
-    if packet_id == 1 and recording:
-        if len(data) >= HEADER_SIZE + 8:
-            session_info = struct.unpack("<BbbBHbB", data[HEADER_SIZE:HEADER_SIZE+8])
-            current_track_id = session_info[6]
+            # Motion Data:
+            if packet_id == 0 and recording:
+                player_offset = HEADER_SIZE + (player_car_index * 60)
+                if len(data) >= player_offset + 60:
+                    motion = struct.unpack("<ffffffhhhhhhffffff", data[player_offset:player_offset+60])
+                    current_telemetry.update({
+                        "x_pos": motion[0],
+                        "y_pos": motion[1],
+                        "z_pos": motion[2]
+                    })
+                    # Only record if lap distance is positive:
+                    if current_telemetry.get("lap_distance", -1.0) >= 0.0:
+                        lap_data.append(current_telemetry.copy())
 
-    # Lap Data
-    if packet_id == 2:
-        player_offset = HEADER_SIZE + (player_car_index * 57)
+            # Session Data:
+            if packet_id == 1 and recording:
+                if len(data) >= HEADER_SIZE + 8:
+                    session_info = struct.unpack("<BbbBHbB", data[HEADER_SIZE:HEADER_SIZE+8])
+                    new_track_id = session_info[6]
+                    if new_track_id != self.current_track_id:
+                        self.current_track_id = new_track_id
+                        track_name = TRACK_IDS.get(self.current_track_id)
+                        if track_name:
+                            self.load_ground_truth(track_name)
 
-        if len(data) >= player_offset + 57:
-            lap_info = struct.unpack("<IIHBHBHBHBfffBBBBBBBBBBBBBBBHHBfB", data[player_offset:player_offset+57])
+            # Lap Data
+            if packet_id == 2:
+                player_offset = HEADER_SIZE + (player_car_index * 57)
+
+                if len(data) >= player_offset + 57:
+                    lap_info = struct.unpack("<IIHBHBHBHBfffBBBBBBBBBBBBBBBHHBfB", data[player_offset:player_offset+57])
                
-            lap_number = lap_info[14]
-            lap_time_ms = lap_info[0]
-            lap_distance = lap_info[10]
-            sector = lap_info[13] + 1  # Convert 0-indexed to 1-indexed
+                    lap_number = lap_info[14]
+                    lap_time_ms = lap_info[0]
+                    lap_distance = lap_info[10]
+                    sector = lap_info[13] + 1  # Convert 0-indexed to 1-indexed
 
-            if session_dir is None:
-                session_dir = output_dir / datetime.now().strftime("%Y_%m_%d_%H%M%S")
-                session_dir.mkdir(parents=True, exist_ok=True)
-                lap_data = []
-                lap_start_time = session_time
-                current_sector = sector
-                print("New session started.")
+                    if session_dir is None:
+                        session_dir = output_dir / datetime.now().strftime("%Y_%m_%d_%H%M%S")
+                        session_dir.mkdir(parents=True, exist_ok=True)
+                        lap_data = []
+                        lap_start_time = session_time
+                        current_sector = sector
+                        print("New session started.")
+                    
+                    if lap_number < current_lap:
+                        session_dir = output_dir / datetime.now().strftime("%Y_%m_%d_%H%M%S")
+                        session_dir.mkdir(parents=True, exist_ok=True)
+                        lap_data = []
+                        lap_start_time = session_time
+                        current_sector = sector
+                        print("New session started.")
+                    
+                    if lap_number == current_lap and lap_distance < last_lap_distance - 500:
+                        lap_data = []
+                        lap_start_time = session_time
+                        current_sector = sector
+                        print(f"Lap {lap_number} restarted - cleared telemetry")
+                    
+                    if last_lap_distance < 0 and lap_distance >= 0:
+                        lap_data = []
+                        lap_start_time = session_time
+
+                    last_lap_distance = lap_distance
+
+                    # Store lap context for merging with telemetry/motion
+                    current_telemetry["lap_distance"] = lap_distance
+                    current_telemetry["sector"] = sector
+                    current_telemetry["laptime"] = (session_time - lap_start_time) if lap_start_time else 0
+
+                    if lap_number > current_lap and current_lap > 0:
+                        filename = session_dir / f"lap_{current_lap}.csv"
+                        save_lap_csv(filename, lap_data)
+                        lap_data = []
+                        lap_start_time = session_time
             
-            if lap_number < current_lap:
-                session_dir = output_dir / datetime.now().strftime("%Y_%m_%d_%H%M%S")
-                session_dir.mkdir(parents=True, exist_ok=True)
-                lap_data = []
-                lap_start_time = session_time
-                current_sector = sector
-                print("New session started.")
-            
-            if lap_number == current_lap and lap_distance < last_lap_distance - 500:
-                lap_data = []
-                lap_start_time = session_time
-                current_sector = sector
-                print(f"Lap {lap_number} restarted - cleared telemetry")
-            
-            if last_lap_distance < 0 and lap_distance >= 0:
-                lap_data = []
-                lap_start_time = session_time
+                    current_lap = lap_number
+                    current_sector = sector
+                    recording = current_lap > 0
 
-            last_lap_distance = lap_distance
-
-            # Store lap context for merging with telemetry/motion
-            current_telemetry["lap_distance"] = lap_distance
-            current_telemetry["sector"] = sector
-            current_telemetry["laptime"] = (session_time - lap_start_time) if lap_start_time else 0
-
-            if lap_number > current_lap and current_lap > 0:
-                filename = session_dir / f"lap_{current_lap}.csv"
-                save_lap_csv(filename, lap_data)
-                lap_data = []
-                lap_start_time = session_time
-            
-            current_lap = lap_number
-            current_sector = sector
-            recording = current_lap > 0
-
-    # Car Telemetry
-    if packet_id == 6 and recording:
-        player_offset = HEADER_SIZE + (player_car_index * 33)
-        if len(data) >= player_offset + 33:
-            tel = struct.unpack("<HfffBbHBBHHBBHfB", data[player_offset:player_offset+33])
-            current_telemetry.update({
-                "speed": tel[0],
-                "throttle": tel[1],
-                "steering_angle": tel[2],
-                "brake": tel[3],
-                "gear": tel[5],
-                "rpm": tel[6],
-                "drs": tel[7]
-            })
+            # Car Telemetry
+            if packet_id == 6 and recording:
+                player_offset = HEADER_SIZE + (player_car_index * 33)
+                if len(data) >= player_offset + 33:
+                    tel = struct.unpack("<HfffBbHBBHHBBHfB", data[player_offset:player_offset+33])
+                    current_telemetry.update({
+                        "speed": tel[0],
+                        "throttle": tel[1],
+                        "steering_angle": tel[2],
+                        "brake": tel[3],
+                        "gear": tel[5],
+                        "rpm": tel[6],
+                        "drs": tel[7]
+                    })
