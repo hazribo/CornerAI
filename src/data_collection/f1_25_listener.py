@@ -89,8 +89,23 @@ class UDPListener(threading.Thread):
         if gt_path.exists():
             self.gt_df = pd.read_csv(gt_path)
             self.gt_distances = self.gt_df["cl_dist"].values
-            self.gt_speeds = self.gt_df["speed"].values
-            print(f"Loaded ground truth for {track_name}")
+            self.gt_speeds = self.gt_df["speed_exp"].values
+            
+            # Use your existing advice logic to get the AI braking points:
+            ref_brake = build_references_from_gt(self.gt_df, mode="brake")
+            
+            self.ai_braking_zones = []
+            for b_dist in ref_brake:
+                # Find AI speed exactly at this braking point:
+                ai_slice = self.gt_df.iloc[(self.gt_df["cl_dist"] - b_dist).abs().argsort()[:1]]
+                if not ai_slice.empty:
+                    ai_v_ms = ai_slice["speed_exp"].iloc[0] / 3.6
+                    self.ai_braking_zones.append({
+                        "ai_brake_dist": float(b_dist),
+                        "ai_v_ms": float(ai_v_ms)
+                    })
+                    
+            print(f"Loaded ground truth for {track_name} with {len(self.ai_braking_zones)} braking zones")
 
     def run(self):
         while True:
@@ -108,7 +123,7 @@ class UDPListener(threading.Thread):
             player_car_index = header[10]
 
             # Motion Data:
-            if packet_id == 0 and recording:
+            if packet_id == 0 and self.recording:
                 player_offset = HEADER_SIZE + (player_car_index * 60)
                 if len(data) >= player_offset + 60:
                     motion = struct.unpack("<ffffffhhhhhhffffff", data[player_offset:player_offset+60])
@@ -119,10 +134,10 @@ class UDPListener(threading.Thread):
                     })
                     # Only record if lap distance is positive:
                     if self.current_telemetry.get("lap_distance", -1.0) >= 0.0:
-                        lap_data.append(self.current_telemetry.copy())
+                        self.lap_data.append(self.current_telemetry.copy())
 
             # Session Data:
-            if packet_id == 1 and recording:
+            if packet_id == 1 and self.recording:
                 if len(data) >= HEADER_SIZE + 8:
                     session_info = struct.unpack("<BbbBHbB", data[HEADER_SIZE:HEADER_SIZE+8])
                     new_track_id = session_info[6]
@@ -144,51 +159,51 @@ class UDPListener(threading.Thread):
                     lap_distance = lap_info[10]
                     sector = lap_info[13] + 1  # Convert 0-indexed to 1-indexed
 
-                    if session_dir is None:
-                        session_dir = output_dir / datetime.now().strftime("%Y_%m_%d_%H%M%S")
-                        session_dir.mkdir(parents=True, exist_ok=True)
-                        lap_data = []
-                        lap_start_time = session_time
-                        current_sector = sector
+                    if self.session_dir is None:
+                        self.session_dir = output_dir / datetime.now().strftime("%Y_%m_%d_%H%M%S")
+                        self.session_dir.mkdir(parents=True, exist_ok=True)
+                        self.lap_data = []
+                        self.lap_start_time = session_time
+                        self.current_sector = sector
                         print("New session started.")
                     
-                    if lap_number < current_lap:
-                        session_dir = output_dir / datetime.now().strftime("%Y_%m_%d_%H%M%S")
-                        session_dir.mkdir(parents=True, exist_ok=True)
-                        lap_data = []
-                        lap_start_time = session_time
-                        current_sector = sector
+                    if lap_number < self.current_lap:
+                        self.session_dir = output_dir / datetime.now().strftime("%Y_%m_%d_%H%M%S")
+                        self.session_dir.mkdir(parents=True, exist_ok=True)
+                        self.lap_data = []
+                        self.lap_start_time = session_time
+                        self.current_sector = sector
                         print("New session started.")
                     
-                    if lap_number == current_lap and lap_distance < last_lap_distance - 500:
-                        lap_data = []
-                        lap_start_time = session_time
-                        current_sector = sector
+                    if lap_number == self.current_lap and lap_distance < self.last_lap_distance - 500:
+                        self.lap_data = []
+                        self.lap_start_time = session_time
+                        self.current_sector = sector
                         print(f"Lap {lap_number} restarted - cleared telemetry")
                     
-                    if last_lap_distance < 0 and lap_distance >= 0:
-                        lap_data = []
-                        lap_start_time = session_time
+                    if self.last_lap_distance < 0 and lap_distance >= 0:
+                        self.lap_data = []
+                        self.lap_start_time = session_time
 
-                    last_lap_distance = lap_distance
+                    self.last_lap_distance = lap_distance
 
-                    # Store lap context for merging with telemetry/motion
+                    # Store lap context for merging with telemetry/motion:
                     self.current_telemetry["lap_distance"] = lap_distance
                     self.current_telemetry["sector"] = sector
-                    self.current_telemetry["laptime"] = (session_time - lap_start_time) if lap_start_time else 0
+                    self.current_telemetry["laptime"] = (session_time - self.lap_start_time) if self.lap_start_time else 0
 
-                    if lap_number > current_lap and current_lap > 0:
-                        filename = session_dir / f"lap_{current_lap}.csv"
-                        self.save_lap_csv(filename, lap_data)
-                        lap_data = []
-                        lap_start_time = session_time
+                    if lap_number > self.current_lap and self.current_lap > 0:
+                        filename = self.session_dir / f"lap_{self.current_lap}.csv"
+                        self.save_lap_csv(filename, self.lap_data)
+                        self.lap_data = []
+                        self.lap_start_time = session_time
             
-                    current_lap = lap_number
-                    current_sector = sector
-                    recording = current_lap > 0
+                    self.current_lap = lap_number
+                    self.current_sector = sector
+                    self.recording = self.current_lap > 0
 
             # Car Telemetry
-            if packet_id == 6 and recording:
+            if packet_id == 6 and self.recording:
                 player_offset = HEADER_SIZE + (player_car_index * 33)
                 if len(data) >= player_offset + 33:
                     tel = struct.unpack("<HfffBbHBBHHBBHfB", data[player_offset:player_offset+33])
@@ -277,9 +292,13 @@ class Overlay(QWidget):
     def __init__(self, listener: UDPListener):
         super().__init__()
         self.listener = listener
+        # Tracking values for sound cues:
+        self.last_dist = 0.0
+        self.beeped_this_corner = False
         self.setup_ui()
         
         # Refresh the UI at ~60fps (16ms):
+        # TODO: test adjusting this for 144+hz displays/using vsync:
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_overlay)
         self.timer.start(16)
@@ -296,6 +315,7 @@ class Overlay(QWidget):
         
         self.layout = QVBoxLayout()
         self.label = QLabel("Waiting for telemetry...", self)
+        self.label.setTextFormat(Qt.TextFormat.RichText)
         self.label.setFont(QFont("Arial", 20, QFont.Weight.Bold))
         self.label.setStyleSheet("color: white; background-color: rgba(0, 0, 0, 150); padding: 10px; border-radius: 10px;")
         
@@ -313,10 +333,38 @@ class Overlay(QWidget):
             diff = live_speed - expected_speed
             
             color = "lime" if diff >= 0 else "red"
-            text = f"Spd: {live_speed:.0f} km/h | Tgt: {expected_speed:.0f} km/h\nDelta: <span style='color:{color}'>{diff:+.0f}</span>"
+            text = f"Spd: {live_speed:.0f} km/h | Tgt: {expected_speed:.0f} km/h<br>Delta: <span style='color:{color}'>{diff:+.0f}</span>"
             self.label.setText(text)
         else:
             self.label.setText(f"Speed: {live_speed:.0f} km/h (No Target)")
+
+        # Identify upcoming braking zone:
+        upcoming_zone = None
+        if hasattr(self.listener, 'ai_braking_zones'):
+            for zone in self.listener.ai_braking_zones:
+                if 0 < (zone["ai_brake_dist"] - live_dist) < 300:
+                    upcoming_zone = zone
+                    break
+
+        if upcoming_zone:
+            live_v_ms = float(live_speed) / 3.6
+            ai_v_ms = upcoming_zone["ai_v_ms"]
+            # taken from game_model.py:
+            a = 44.1 
+            p_stop_dist = (live_v_ms**2) / (2 * a)
+            ai_stop_dist = (ai_v_ms**2) / (2 * a)
+            optimal_brake_dist = upcoming_zone["ai_brake_dist"] - p_stop_dist + ai_stop_dist
+
+            # Trigger audio cue at braking zone entry:
+            if self.last_dist < (optimal_brake_dist - 5) and live_dist >= (optimal_brake_dist - 5):
+                if not self.beeped_this_corner:
+                    QApplication.beep() # system default "beep" - can be replaced later.
+                    self.beeped_this_corner = True
+                    
+        # Reset corner beep latch for next lap:
+        elif self.beeped_this_corner and tel.get("throttle") == 1.0:
+            self.beeped_this_corner = False
+        self.last_dist = live_dist
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
