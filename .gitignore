@@ -215,6 +215,11 @@ data/features
 data/corner_info
 data/
 
+<<<<<<< HEAD
 # poster:
 *.pdf
 *.pptx
+=======
+# Remove powerpoints:
+*.pptx
+>>>>>>> 87014d8062281d9b26852d9892e0e6c03e769961
