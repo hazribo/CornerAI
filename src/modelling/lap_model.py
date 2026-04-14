@@ -84,10 +84,6 @@ def load_historical_laps():
     out = out.sort_values(["track", "year", "lap_id", "distance"]).reset_index(drop=True)
     return out
 
-def label_window_distance(distance_m, event_idx, window_min):
-    event_distance_m = distance_m[event_idx]
-    return (np.abs(distance_m  - event_distance_m) <= window_min).astype(np.int32)
-
 class RandomForestModel:
     def __init__(self):
         self.models_by_track: dict[str, dict[str, RandomForestClassifier]] = {}

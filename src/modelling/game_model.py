@@ -80,10 +80,6 @@ def load_game_laps():
     out = pd.concat(frames, ignore_index=True)
     return out.sort_values(["track", "difficulty", "year", "lap_id", "distance"]).reset_index(drop=True)
 
-def label_window_distance(distance_m, event_idx, window_min):
-    event_distance_m = distance_m[event_idx]
-    return (np.abs(distance_m  - event_distance_m) <= window_min).astype(np.int32)
-
 # TODO: change top_pct once more laps have been collected.
 # Very few laps currently, so top_pct = 0.2 would remove too many laps.
 def filter_fast_laps(df: pd.DataFrame, top_pct: float = 0.7) -> pd.DataFrame:

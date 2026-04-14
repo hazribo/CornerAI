@@ -2,8 +2,6 @@ import numpy as np
 import pandas as pd
 from scipy.spatial import cKDTree
 
-from modelling.lap_model import label_window_distance
-
 ####################################################
 # Utils for use by game_model.py and lap_model.py. #
 ####################################################
@@ -143,6 +141,10 @@ def add_should_throttle(
 
     out["should_throttle"] = (out["p_throttle_zone"] >= float(throttle_prob_min)).astype(int)
     return out
+
+def label_window_distance(distance_m, event_idx, window_min):
+    event_distance_m = distance_m[event_idx]
+    return (np.abs(distance_m  - event_distance_m) <= window_min).astype(np.int32)
 
 def add_labels(df: pd.DataFrame, LABELS: dict[str, float]) -> pd.DataFrame:
     out = df.sort_values(["track", "year", "lap_id", "distance"]).copy()
