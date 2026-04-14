@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 from scipy.spatial import cKDTree
 
+from modelling.lap_model import label_window_distance
+
 ####################################################
 # Utils for use by game_model.py and lap_model.py. #
 ####################################################
@@ -140,6 +142,46 @@ def add_should_throttle(
     )
 
     out["should_throttle"] = (out["p_throttle_zone"] >= float(throttle_prob_min)).astype(int)
+    return out
+
+def add_labels(df: pd.DataFrame, LABELS: dict[str, float]) -> pd.DataFrame:
+    out = df.sort_values(["track", "year", "lap_id", "distance"]).copy()
+    out["y_brake_zone"] = 0
+    out["y_throttle_zone"] = 0
+
+    brake_on = LABELS["brake_threshold"]
+    throttle_on = LABELS["throttle_threshold"]
+    brake_off = LABELS["brake_lift_min"]
+    throttle_off = LABELS["throttle_lift_min"]
+    brake_window_min = LABELS["brake_window_min"]
+
+    grouped_data = out.groupby(["track", "year", "lap_id"], sort=False)
+
+    for (_, _, _), lap_df in grouped_data:
+        idx = lap_df.index.to_numpy()
+
+        distance = lap_df["distance"].to_numpy()
+        brake = lap_df["brake"].to_numpy()
+        throttle = lap_df["throttle"].to_numpy()
+
+        # calc both brake and throttle deltas:
+        brake_delta = np.diff(brake, prepend=brake[0])
+
+        # get braking point and throttle zones:
+        brake_start = (
+            brake >= brake_on) & (
+            brake_delta >= brake_off) & (
+            throttle <= throttle_off
+        )
+        brake_zone = np.zeros(len(lap_df), dtype=np.int32)
+        for event_idx in np.flatnonzero(brake_start):
+            brake_zone = np.maximum(brake_zone, label_window_distance(distance, event_idx, brake_window_min))
+
+        throttle_zone = ((throttle >= throttle_on) & (brake <= brake_off)).astype(np.int32)
+
+        out.loc[idx, "y_brake_zone"] = brake_zone
+        out.loc[idx, "y_throttle_zone"] = throttle_zone
+
     return out
 
 class Curvature:
