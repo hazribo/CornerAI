@@ -8,7 +8,7 @@ from track_plots import PlotTrackMaps
 
 from sklearn.model_selection import GroupShuffleSplit
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import mean_absolute_error, r2_score
+from sklearn.metrics import mean_absolute_error, r2_score, root_mean_squared_error
 import joblib
 
 MODEL_OUTPUT_DIR = Path(__file__).resolve().parents[2] / "data" / "models" / "f1-25"
@@ -68,7 +68,7 @@ class RandomForestModel:
         training_df = laps.copy()
         bundle = RandomForestModel()
         bundle.feature_cols = list(FEATURE_COLS)
-        maes, r2s = [], []
+        maes, r2s, rmses = [], [], []
 
         for track_name, track_df in training_df.groupby("track", sort=False):
             start_time = time.perf_counter()
@@ -86,17 +86,20 @@ class RandomForestModel:
             preds = speed_model.predict(X.iloc[test_idx])
             mae = mean_absolute_error(y.iloc[test_idx], preds)
             r2 = r2_score(y.iloc[test_idx], preds)
+            rmse = root_mean_squared_error(y.iloc[test_idx], preds)
             maes.append(mae)
             r2s.append(r2)
+            rmses.append(rmse)
 
             
             end_time = time.perf_counter() - start_time
-            print(f"[{track_name}]: MAE {mae:.4f}, R2 {r2:.4f}")
+            print(f"[{track_name}]: MAE {mae:.4f}, R2 {r2:.4f}, RMSE {rmse:.4f}")
             print(f"Time elapsed for {track_name}: {end_time:.2f}s")
 
             bundle.models_by_track[str(track_name)] = speed_model 
         print(f"Average MAE: {np.mean(maes):.4f}")
         print(f"Average R2: {np.mean(r2s):.4f}")
+        print(f"Average RMSE: {np.mean(rmses):.4f}")
         return bundle
 
     def predict(self, laps: pd.DataFrame) -> pd.DataFrame:
