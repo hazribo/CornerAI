@@ -247,7 +247,7 @@ class RandomForestModel:
         }])
         metrics_df = pd.concat([overall_row, metrics_df], ignore_index=True)
         
-        csv_path = MODEL_OUTPUT_DIR / "game_metrics_lap.csv"
+        csv_path = MODEL_OUTPUT_DIR / "game_lap_metrics.csv"
         metrics_df.to_csv(csv_path, index=False)
         print(f"\nClassification metrics saved to {csv_path}.")
 
