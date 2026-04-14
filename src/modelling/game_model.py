@@ -10,8 +10,8 @@ from model_utils import Curvature, build_centreline, project_to_centreline, buil
 # model imports:
 from sklearn.model_selection import GroupShuffleSplit
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 import joblib
-from scipy.spatial import cKDTree # For nearest-neighbour; centreline
 
 F125_PROCESSED_DIR = Path(__file__).resolve().parents[2] / "data" / "processed" / "f1-25" / "laps"
 MODEL_OUTPUT_DIR = Path(__file__).resolve().parents[2] / "data" / "models" / "f1-25"
@@ -180,7 +180,8 @@ class RandomForestModel:
         training_df = laps.copy()
         bundle = RandomForestModel()
         bundle.feature_cols = list(FEATURE_COLS)
-        brake_accs, throttle_accs = [], []
+        
+        metrics_log = []
 
         for track_name, track_df in training_df.groupby("track", sort=False):
             start_time = time.perf_counter()
@@ -198,21 +199,57 @@ class RandomForestModel:
             brake_model.fit(X.iloc[train_idx], y_brake.iloc[train_idx])
             throttle_model.fit(X.iloc[train_idx], y_throttle.iloc[train_idx])
 
-            brake_acc = (brake_model.predict(X.iloc[test_idx]) == y_brake.iloc[test_idx]).mean()
-            throttle_acc = (throttle_model.predict(X.iloc[test_idx]) == y_throttle.iloc[test_idx]).mean()
+            # Get all metrics for brake and throttle predictions:
+            brake_preds = brake_model.predict(X.iloc[test_idx])
+            throttle_preds = throttle_model.predict(X.iloc[test_idx])
+            
+            b_acc = accuracy_score(y_brake.iloc[test_idx], brake_preds)
+            b_prec = precision_score(y_brake.iloc[test_idx], brake_preds, average='macro', zero_division=0)
+            b_rec = recall_score(y_brake.iloc[test_idx], brake_preds, average='macro', zero_division=0)
+            b_f1 = f1_score(y_brake.iloc[test_idx], brake_preds, average='macro')
+            t_acc = accuracy_score(y_throttle.iloc[test_idx], throttle_preds)
+            t_prec = precision_score(y_throttle.iloc[test_idx], throttle_preds, average='macro', zero_division=0)
+            t_rec = recall_score(y_throttle.iloc[test_idx], throttle_preds, average='macro', zero_division=0)
+            t_f1 = f1_score(y_throttle.iloc[test_idx], throttle_preds, average='macro')
+            
             end_time = time.perf_counter() - start_time
-            print(f"[{track_name}] Accuracies: brake {brake_acc:.4f}, throttle {throttle_acc:.4f}")
-            print(f"Time elapsed for {track_name}: {end_time:.2f}s")
+            print(f"[{track_name}] Brake F1 (Macro): {b_f1:.4f} ({end_time:.2f}s)")
+            print(f"[{track_name}] Throttle F1 (Macro): {t_f1:.4f} ({end_time:.2f}s)")
+            
+            metrics_log.append({
+                "Circuit": track_name,
+                "Brake_Accuracy": b_acc,
+                "Brake_Precision": b_prec,
+                "Brake_Recall": b_rec,
+                "Brake_F1": b_f1,
+                "Throttle_Accuracy": t_acc,
+                "Throttle_Precision": t_prec,
+                "Throttle_Recall": t_rec,
+                "Throttle_F1": t_f1,
+            })
 
             bundle.models_by_track[str(track_name)] = {
                 "brake": brake_model,
                 "throttle": throttle_model,
             }
-            brake_accs.append(brake_acc)
-            throttle_accs.append(throttle_acc)
 
-        print(f"Average Brake Accuracy: {np.mean(brake_accs):.4f}")
-        print(f"Average Throttle Accuracy: {np.mean(throttle_accs):.4f}")
+        metrics_df = pd.DataFrame(metrics_log)
+        overall_row = pd.DataFrame([{
+            "Circuit": "Overall (All Circuits)",
+            "Brake_Accuracy": metrics_df["Brake_Accuracy"].mean(),
+            "Brake_Precision": metrics_df["Brake_Precision"].mean(),
+            "Brake_Recall": metrics_df["Brake_Recall"].mean(),
+            "Brake_F1": metrics_df["Brake_F1"].mean(),
+            "Throttle_Accuracy": metrics_df["Throttle_Accuracy"].mean(),
+            "Throttle_Precision": metrics_df["Throttle_Precision"].mean(),
+            "Throttle_Recall": metrics_df["Throttle_Recall"].mean(),
+            "Throttle_F1": metrics_df["Throttle_F1"].mean(),
+        }])
+        metrics_df = pd.concat([overall_row, metrics_df], ignore_index=True)
+        
+        csv_path = MODEL_OUTPUT_DIR / "game_lap_metrics.csv"
+        metrics_df.to_csv(csv_path, index=False)
+        print(f"\nClassification metrics saved to {csv_path}.")
 
         return bundle
     
