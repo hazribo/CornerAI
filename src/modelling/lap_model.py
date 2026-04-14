@@ -27,10 +27,10 @@ TRACK_ALIASES = {
 
 # feature columns and label details for RF model:
 N_COLS_DEFAULT = 4
-FEATURE_COLS = ["time", "distance", "x", "y", "z", "speed", "throttle", "brake", "rpm", "gear", "drs",
+FEATURE_COLS = ["distance", "x", "y", "z",
                 "c", "c_smooth", # curvature + smoothed curvature
-                *[f"cb{i}" for i in range(1, N_COLS_DEFAULT + 1)],
-                *[f"ca{i}" for i in range(1, N_COLS_DEFAULT + 1)]]
+                *[f"ca{i}" for i in range(1, N_COLS_DEFAULT + 1)],
+                ]
 
 LABELS = {
     "brake_threshold": 0.1,
