@@ -4,7 +4,7 @@ import pandas as pd
 import time
 # file imports:
 from track_plots import PlotTrackMaps
-from model_utils import Curvature, build_centreline, project_to_centreline, build_track_ground_truth, add_should_throttle, add_should_brake
+from model_utils import Curvature, build_centreline, project_to_centreline, build_track_ground_truth, add_should_throttle, add_should_brake, add_labels
 # model imports:
 from sklearn.model_selection import GroupShuffleSplit
 from sklearn.ensemble import RandomForestClassifier
@@ -27,21 +27,18 @@ TRACK_ALIASES = {
 
 # feature columns and label details for RF model:
 N_COLS_DEFAULT = 4
-FEATURE_COLS = ["time", "distance", "x", "y", "z", "speed", "throttle", "brake", "rpm", "gear", "drs",
+FEATURE_COLS = ["distance", "x", "y", "z",
                 "c", "c_smooth", # curvature + smoothed curvature
-                *[f"cb{i}" for i in range(1, N_COLS_DEFAULT + 1)],
-                *[f"ca{i}" for i in range(1, N_COLS_DEFAULT + 1)]]
+                *[f"ca{i}" for i in range(1, N_COLS_DEFAULT + 1)],
+                ]
 
 LABELS = {
     "brake_threshold": 0.1,
     "brake_lift_min": 0.05,
     "throttle_lift_min": 0.1,
     "throttle_threshold": 0.2,
-    "brake_window_min": 10.0,
-    "throttle_window_min": 10.0
+    "brake_window_min": 25.0, # larger brake window than game model - adjusted for 4hz-20hz upsampling.
 }
-
-# TODO: make compatible with game model code/advice/plots for comparisons between real laps and player-driven laps in-game.
 
 def load_build_cache(
     cache_name: str = "laps_cached.pkl",
@@ -53,7 +50,7 @@ def load_build_cache(
 
     df = load_historical_laps()
     df = Curvature.add_curv_cols(df, n_cols=N_COLS_DEFAULT, dist_interval=50) 
-    df = add_labels(df)
+    df = add_labels(df, LABELS)
 
     df.to_pickle(cache_path)
     return df
@@ -82,64 +79,6 @@ def load_historical_laps():
 
     out = pd.concat(frames, ignore_index=True)
     out = out.sort_values(["track", "year", "lap_id", "distance"]).reset_index(drop=True)
-    return out
-
-def label_window_distance(distance_m, event_idx, window_min):
-    event_distance_m = distance_m[event_idx]
-    return (np.abs(distance_m  - event_distance_m) <= window_min).astype(np.int32)
-
-def add_labels(df: pd.DataFrame):
-    out = df.sort_values(["track", "year", "lap_id", "distance"]).copy()
-    out["y_brake_zone"] = 0
-    out["y_throttle_zone"] = 0
-
-    brake_on = LABELS["brake_threshold"]
-    throttle_on = LABELS["throttle_threshold"]
-    brake_off = LABELS["brake_lift_min"]
-    throttle_off = LABELS["throttle_lift_min"]
-    brake_window_min = LABELS["brake_window_min"]
-    throttle_window_min = LABELS["throttle_window_min"]
-
-    grouped_data = out.groupby(["track", "year", "lap_id"], sort=False)
-
-    for (_, _, _), lap_df in grouped_data:
-        idx = lap_df.index.to_numpy()
-
-        distance = lap_df["distance"].to_numpy()
-        brake = lap_df["brake"].to_numpy()
-        throttle = lap_df["throttle"].to_numpy()
-
-        # calc both brake and throttle deltas:
-        brake_delta = np.diff(brake, prepend=brake[0])
-        throttle_delta = np.diff(throttle, prepend=throttle[0])
-
-        # get braking point and throttle zones:
-        brake_start = (
-            brake >= brake_on) & (
-            brake_delta >= brake_off) & (
-            throttle <= throttle_off
-            )
-        brake_zone = np.zeros(len(lap_df), dtype=np.int32)
-        
-        # get where throttle float is "low", to register when throttle is rising:
-        low_throttle = np.r_[True, throttle[:-1] <= throttle_off]
-
-        throttle_start = (
-            throttle >= throttle_on) & (
-            throttle_delta >= throttle_off) & (
-            brake <= brake_off) & (
-            low_throttle
-            )
-        throttle_zone = np.zeros(len(lap_df), dtype=np.int32)
-
-        for event_idx in np.flatnonzero(brake_start):
-            brake_zone = np.maximum(brake_zone, label_window_distance(distance, event_idx, brake_window_min))
-        for event_idx in np.flatnonzero(throttle_start):
-            throttle_zone = np.maximum(throttle_zone, label_window_distance(distance, event_idx, throttle_window_min))
-
-        out.loc[idx, "y_brake_zone"] = brake_zone
-        out.loc[idx, "y_throttle_zone"] = throttle_zone
-
     return out
 
 class RandomForestModel:
