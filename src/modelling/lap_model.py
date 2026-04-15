@@ -37,11 +37,8 @@ LABELS = {
     "brake_lift_min": 0.05,
     "throttle_lift_min": 0.1,
     "throttle_threshold": 0.2,
-    "brake_window_min": 10.0,
-    "throttle_window_min": 10.0
+    "brake_window_min": 25.0, # larger brake window than game model - adjusted for 4hz-20hz upsampling.
 }
-
-# TODO: make compatible with game model code/advice/plots for comparisons between real laps and player-driven laps in-game.
 
 def load_build_cache(
     cache_name: str = "laps_cached.pkl",
