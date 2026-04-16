@@ -83,7 +83,7 @@ def load_game_laps():
 
 # TODO: change top_pct once more laps have been collected.
 # Very few laps currently, so top_pct = 0.2 would remove too many laps.
-def filter_fast_laps(df: pd.DataFrame, top_pct: float = 0.7) -> pd.DataFrame:
+def filter_fast_laps(df: pd.DataFrame, top_pct: float = 0.8) -> pd.DataFrame:
     fast_ids = set()
     for _, track_df in df.groupby("track"):
         lap_times = track_df.groupby("lap_id")["laptime"].first().dropna().sort_values()
