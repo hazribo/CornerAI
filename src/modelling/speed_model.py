@@ -3,7 +3,8 @@ import numpy as np
 import pandas as pd
 import time
 
-from game_model import load_build_cache, filter_fast_laps
+from game_model import load_build_cache as load_game, filter_fast_laps
+from lap_model import load_build_cache as load_historical
 from track_plots import PlotTrackMaps
 
 from sklearn.model_selection import GroupShuffleSplit
@@ -11,7 +12,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, r2_score, root_mean_squared_error
 import joblib
 
-MODEL_OUTPUT_DIR = Path(__file__).resolve().parents[2] / "data" / "models" / "f1-25"
+MODEL_OUTPUT_DIR = Path(__file__).resolve().parents[2] / "data" / "models"
 CACHE_DIR = Path(__file__).resolve().parents[2] / "data" / "cache" / "f1-25"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -64,7 +65,7 @@ class RandomForestModel:
         return m
 
     @staticmethod
-    def train_models(laps: pd.DataFrame):
+    def train_models(laps: pd.DataFrame, output_dir: Path):
         training_df = laps.copy()
         bundle = RandomForestModel()
         bundle.feature_cols = list(FEATURE_COLS)
@@ -110,7 +111,7 @@ class RandomForestModel:
         }])
         metrics_df = pd.concat([overall_row, metrics_df], ignore_index=True)
         
-        csv_path = MODEL_OUTPUT_DIR / "regression_metrics_speed.csv"
+        csv_path = output_dir / "regression_metrics_speed.csv"
         metrics_df.to_csv(csv_path, index=False)
         print(f"Regression metrics saved to {csv_path}.")
         
@@ -131,22 +132,41 @@ class RandomForestModel:
         return laps
 
 if __name__ == "__main__":
-    df = load_build_cache(cache_dir=CACHE_DIR, rebuild=False) 
-    print(f"cache loaded: rows={len(df):,} cols={df.shape[1]:,}")
-    fast_laps = filter_fast_laps(df, top_pct=0.7)
+    df_game = load_game(cache_dir=CACHE_DIR, rebuild=False) 
+    print(f"Game data cache loaded: rows={len(df_game):,} cols={df_game.shape[1]:,}")
+    fast_game_laps = filter_fast_laps(df_game, top_pct=0.8)
     
-    model_path = MODEL_OUTPUT_DIR / "speed_model.joblib"
-    model = RandomForestModel.train_models(fast_laps) 
-    path = model.save_model()
-    print(f"Saved model to {path}.")
+    model_path_game = MODEL_OUTPUT_DIR / "f1-25"
+    model_game = RandomForestModel.train_models(fast_game_laps, output_dir=model_path_game) 
+    path = model_game.save_model()
+    print(f"Saved speed model (game) model to {path}.")
     
-    scored = model.predict(df) 
+    scored = model_game.predict(df_game) 
     track_names = scored["track"].unique()
     for track in track_names:
         PlotTrackMaps.plot_predicted_speed(
             laps=scored,
             track_name=track, 
-            out_dir=MODEL_OUTPUT_DIR,
+            out_dir=model_path_game,
             speed_col="predicted_speed"
         )
-    print(f"Predicted speed heatmaps saved to {MODEL_OUTPUT_DIR}.")
+
+    df_hist = load_historical(rebuild=False)
+    print(f"Historical data cache loaded: rows={len(df_hist):,} cols={df_hist.shape[1]:,}")
+    fast_hist_laps = filter_fast_laps(df_hist, top_pct=0.8)
+    
+    model_path_hist = MODEL_OUTPUT_DIR / "historical" 
+    model_hist = RandomForestModel.train_models(fast_hist_laps, output_dir=model_path_hist)
+    path = model_hist.save_model(output=model_path_hist / "speed_model_hist.joblib")
+    print(f"Saved speed model (historical) model to {path}.")
+
+    scored = model_hist.predict(df_hist) 
+    track_names = scored["track"].unique()
+    for track in track_names:
+        PlotTrackMaps.plot_predicted_speed(
+            laps=scored,
+            track_name=track, 
+            out_dir=model_path_hist,
+            speed_col="predicted_speed"
+        )
+    print(f"Predicted speed heatmaps saved to respective folders.")
