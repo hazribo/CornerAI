@@ -15,6 +15,7 @@ import joblib
 
 F125_PROCESSED_DIR = Path(__file__).resolve().parents[2] / "data" / "processed" / "f1-25" / "laps"
 MODEL_OUTPUT_DIR = Path(__file__).resolve().parents[2] / "data" / "models" / "f1-25"
+MODEL_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 # Cache for processed historical data:
 CACHE_DIR = Path(__file__).resolve().parents[2] / "data" / "cache" / "f1-25"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
