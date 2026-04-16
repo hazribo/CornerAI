@@ -15,6 +15,7 @@ import joblib
 
 F125_PROCESSED_DIR = Path(__file__).resolve().parents[2] / "data" / "processed" / "f1-25" / "laps"
 MODEL_OUTPUT_DIR = Path(__file__).resolve().parents[2] / "data" / "models" / "f1-25"
+MODEL_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 # Cache for processed historical data:
 CACHE_DIR = Path(__file__).resolve().parents[2] / "data" / "cache" / "f1-25"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -69,8 +70,8 @@ def load_game_laps():
                     df["year"] = year
                     df["lap_id"] = fp.stem
 
-                    parts = fp.stem.split("_")
-                    df["laptime"] = pd.to_numeric(parts[2], errors="coerce") if len(parts) > 2 else pd.NA
+                    time_match = re.search(r"_(?:Q|R|P\d)_([\d\.]+)_", fp.stem)
+                    df["laptime"] = float(time_match.group(1)) if time_match else pd.NA
                     frames.append(df)
                 except Exception as e:
                     print(f"fail reading {fp}: {e}")
@@ -250,37 +251,6 @@ if __name__ == "__main__":
         cl_by_track[str(track_name)] = cl
         gt_by_track[str(track_name)] = gt
 
-    # TODO: have advice running real-time in f1_25_listener.py rather than here after training.
-    # TESTING ADVICE:
-    target_track = "1 melbourne"
-    target_lap_id_path = Path(__file__).resolve().parents[2] / "data" / "processed" / "f1-25" / "laps" / "1 melbourne"
-    target_lap_id = f"{target_lap_id_path}/lap_1.csv"
-
-    player_lap = pd.read_csv(target_lap_id)
-    player_lap["track"] = target_track
-    player_lap["year"] = 0
-    player_lap["lap_id"] = "player"
-    player_lap["difficulty"] = 0
-
-    player_lap = Curvature.add_curv_cols(player_lap, n_cols=N_COLS_DEFAULT, dist_interval=50)
-    player_lap = model.predict_probability(player_lap)
-
-    cl = cl_by_track.get(target_track)        
-    player_lap = project_to_centreline(player_lap, cl)  
-    gt = gt_by_track.get(target_track, pd.DataFrame())
-    lap_df = add_should_brake(player_lap, gt)
-    lap_df = add_should_throttle(lap_df, gt).sort_values("cl_dist")  
-
-    track_name = target_track
-
-    ref_brake = build_references_from_gt(gt, mode="brake")
-    ref_throttle = build_references_from_gt(gt, mode="throttle")
-    advice_df = advice(lap_df, ref_brake, ref_throttle, gt=gt)
-
-    txt_path = MODEL_OUTPUT_DIR / f"{track_name}_player_advice.txt"
-    write_advice(advice_df, txt_path, track_name, lap_id="player")
-    print(f"Saved advice: {txt_path}.")
-        ##############################################################
     # Save to csv per track:
     for t, gt in gt_by_track.items():
         gt.to_csv(MODEL_OUTPUT_DIR / f"{t}_ground_truth.csv")
