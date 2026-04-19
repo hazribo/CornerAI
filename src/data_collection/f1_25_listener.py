@@ -324,6 +324,7 @@ class UDPListener(threading.Thread):
             self.pb_speeds = pd.to_numeric(df_pb["speed"], errors="coerce").fillna(0).values
             self.pb_brake = df_pb["brake"].astype(float).values
             self.pb_throttle = df_pb["throttle"].astype(float).values
+            self.pb_times = df_pb["laptime"].astype(float).values 
 
         # Save telemetry to CSV:
         df.to_csv(filename, index=False)

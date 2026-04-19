@@ -75,6 +75,10 @@ class Overlay(QWidget):
             ref_speeds = self.listener.pb_speeds
             ref_brake = self.listener.pb_brake
             ref_throttle = self.listener.pb_throttle
+            if hasattr(self.listener, "pb_times") and live_dist > 0:
+                live_time = tel.get("laptime", 0)
+                expected_pb_time = np.interp(live_dist, ref_dists, self.listener.pb_times)
+                self.time_delta = live_time - expected_pb_time
         else:
             ref_dists = self.listener.gt_distances
             ref_speeds = self.listener.gt_speeds
