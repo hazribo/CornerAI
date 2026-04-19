@@ -2,6 +2,8 @@ from PyQt6.QtWidgets import QApplication, QWidget
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QGuiApplication, QPainter, QColor, QPen, QBrush
 import numpy as np
+import time
+import keyboard # for hotkeys
 
 class Overlay(QWidget):
     def __init__(self, listener):
@@ -16,6 +18,11 @@ class Overlay(QWidget):
         self.expected_speed = 0
         self.diff = 0
         self.dist_to_brake = None
+
+        # Mode settings:
+        self.mode = "optimal" # default - compare against gt optimum
+        self.mode_prefix = "Opt:"
+        keyboard.add_hotkey("F9", self.toggle_mode)
 
         self.setup_ui()
         
@@ -38,21 +45,70 @@ class Overlay(QWidget):
         w, h = 600, 100
         self.setGeometry((screen.width() - w) // 2, 50, w, h)
 
+    def toggle_mode(self):
+        if self.mode == "optimal":
+            if hasattr(self.listener, "pb_distances") and len(self.listener.pb_distances) > 0:
+                self.mode = "pb"
+                self.mode_prefix = "PB:"
+                print("Delta mode switched to Personal Best.")
+            else:
+                print("Cannot switch mode: No laps recorded in this session.")
+
+        else:
+            self.mode = "optimal"
+            self.mode_prefix = "Opt:"
+            print("Delta mode switched to GT Optimum.")
+
+
     def update_overlay(self):
         tel = self.listener.current_telemetry
+        screen = QGuiApplication.primaryScreen().geometry()
+        w, h = 600, 100; center_x = (screen.width() - w) // 2
+        # Get live centreline distance and speed; initialise dist_to_brake:
         live_dist = tel.get("cl_dist", 0) 
         self.live_speed = tel.get("speed", 0)
-        self.exp_brake = tel.get("exp_brake", 0)
-        self.exp_throttle = tel.get("exp_throttle", 0)
         self.dist_to_brake = None
-        
-        # Interpolate expected speed:
-        if len(self.listener.gt_distances) > 0 and live_dist > 0:
-            self.expected_speed = np.interp(live_dist, self.listener.gt_distances, self.listener.gt_speeds)
-            self.diff = self.live_speed - self.expected_speed
+
+        # Decide which reference arrays to use based on mode:
+        if getattr(self, "mode", "optimal") == "pb" and hasattr(self.listener, "pb_distances"):
+            ref_dists = self.listener.pb_distances
+            ref_speeds = self.listener.pb_speeds
+            ref_brake = self.listener.pb_brake
+            ref_throttle = self.listener.pb_throttle
+            if hasattr(self.listener, "pb_times") and live_dist > 0:
+                live_time = tel.get("laptime", 0)
+                expected_pb_time = np.interp(live_dist, ref_dists, self.listener.pb_times)
+                self.time_delta = live_time - expected_pb_time
         else:
-            self.expected_speed = 0
-            self.diff = 0
+            ref_dists = self.listener.gt_distances
+            ref_speeds = self.listener.gt_speeds
+            ref_brake = getattr(self.listener, "gt_brake_exp", [])
+            ref_throttle = getattr(self.listener, "gt_throttle_exp", [])
+        
+        # Interpolate all features:
+        if len(ref_dists) > 0 and live_dist > 0:
+            self.expected_speed = np.interp(live_dist, ref_dists, ref_speeds)
+            self.diff = self.live_speed - self.expected_speed
+            
+            if len(ref_brake) > 0:
+                self.exp_brake = np.interp(live_dist, ref_dists, ref_brake)
+                self.exp_throttle = np.interp(live_dist, ref_dists, ref_throttle)
+            else:
+                self.exp_brake = self.exp_throttle = 0
+        else:
+            self.expected_speed = self.diff = self.exp_brake = self.exp_throttle = 0
+
+        # Check for race control notices:
+        last_popup_time = tel.get("last_ui_popup_time", 0)
+        is_popup_active = (time.time() - last_popup_time) < 6.0 
+        
+        if is_popup_active:
+            target_y = 150  # Shift down below alert
+        else:
+            target_y = 50   # Default position
+
+        if self.y() != target_y:
+            self.setGeometry(center_x, target_y, w, h)
 
         # Identify upcoming braking zone:
         upcoming_zone = None
@@ -140,7 +196,7 @@ class Overlay(QWidget):
         text_y = 35
         painter.setPen(QPen(QColor(255, 255, 255)))
         painter.drawText(20, text_y, f"{self.live_speed:.0f} km/h")
-        target_text = f"Target: {self.expected_speed:.0f} km/h" if self.expected_speed > 0 else "No Target"
+        target_text = f"{getattr(self, 'mode_prefix', 'Opt:')} {self.expected_speed:.0f} km/h" if self.expected_speed > 0 else "No Target"
         painter.drawText(self.width() - 170, text_y, target_text)
 
         # Centre the delta text:
@@ -152,3 +208,90 @@ class Overlay(QWidget):
         if self.dist_to_brake is not None and 0 < self.dist_to_brake <= 150:
             painter.setPen(QPen(QColor(255, 165, 0))) # Orange "warning" colour?
             painter.drawText(center_x - 70, text_y - 20, f"BRAKE IN {self.dist_to_brake:.0f}m")
+
+class StatsOverlay(QWidget):
+    def __init__(self, listener, main_overlay):
+        super().__init__()
+        self.listener = listener
+        self.main_overlay = main_overlay # Keep reference to know the current mode
+        self.setup_ui()
+        # Timer settings:
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update)
+        self.timer.start(33) # ~30fps, fine for the stats overlay
+
+    def setup_ui(self):
+        self.setWindowFlags(
+            Qt.WindowType.WindowStaysOnTopHint | 
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowTransparentForInput
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        
+        screen = QGuiApplication.primaryScreen().geometry()
+        w, h = 250, 200
+        # RHS - vertically aligned to centre:
+        self.setGeometry(screen.width() - w - 20, (screen.height() - h) // 2, w, h)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Translucent dark background:
+        painter.setBrush(QBrush(QColor(0, 0, 0, 200)))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(0, 0, self.width(), self.height(), 10, 10)
+
+        pb_time = getattr(self.listener, "session_best_time", float("inf"))
+        laps = self.listener.current_lap
+        time_diff = getattr(self.main_overlay, "time_delta", 0.0)
+
+        # M:SS.ms formatter
+        def format_time(t):
+            m = int(t // 60)
+            s = t % 60
+            return f"{m}:{s:06.3f}"
+        pb_str = format_time(pb_time) if pb_time != float("inf") else "No PB yet"
+        
+        # Define the base rows (always visible):
+        stats_rows = [
+            ("Target Mode:", self.main_overlay.mode.upper(), QColor(255, 215, 0)),
+            ("Laps Driven:", str(laps), QColor(255, 255, 255)),
+            ("Session PB:", pb_str, QColor(0, 255, 0) if pb_time != float("inf") else QColor(150, 150, 150)),
+        ]
+
+        # Add time delta to state if in PB mode:
+        if self.main_overlay.mode == "pb":
+            # Color coding for time diff:
+            if time_diff < -0.05:
+                delta_str = f"{time_diff:+.3f}s"
+                delta_color = QColor(50, 255, 50)
+            elif time_diff > 0.05:
+                delta_str = f"{time_diff:+.3f}s"
+                delta_color = QColor(255, 50, 50)
+            else:
+                delta_str = f"{time_diff:+.3f}s"
+                delta_color = QColor(255, 255, 255)
+            stats_rows.append(("Time Delta:", delta_str, delta_color))
+
+        # Render header:
+        y_pos = 30
+        painter.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        painter.setPen(QPen(QColor(255, 255, 255)))
+        painter.drawText(15, y_pos, "SESSION STATS")
+        painter.drawLine(15, y_pos + 5, self.width() - 15, y_pos + 5)
+        
+        # Render all rows:
+        y_pos += 35
+        painter.setFont(QFont("Arial", 10, QFont.Weight.Normal))
+        for label, value, color in stats_rows:
+            painter.setPen(QPen(QColor(200, 200, 200))) 
+            painter.drawText(15, y_pos, label)
+            painter.setPen(QPen(color))                 
+            painter.drawText(120, y_pos, value)
+            y_pos += 35
+            
+        # F9 tooltip at bottom of stats box:
+        painter.setFont(QFont("Arial", 8, italic=True))
+        painter.setPen(QPen(QColor(150, 150, 150)))
+        painter.drawText(15, self.height() - 15, "Press F9 to toggle PB/Optimal comparison.")

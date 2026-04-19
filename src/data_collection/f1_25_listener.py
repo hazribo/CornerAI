@@ -2,6 +2,7 @@ import socket
 import struct
 from datetime import datetime
 import pandas as pd
+import time
 # imports for real-time/overlay:
 import threading
 import numpy as np
@@ -18,7 +19,7 @@ try:
     from game_model import RandomForestModel, Curvature, project_to_centreline, add_should_brake, add_should_throttle # type: ignore
     from game_advice import build_references_from_gt, advice, write_advice # type: ignore
     from track_plots import PlotTrackMaps # type: ignore
-    from overlay import Overlay # type: ignore
+    from overlay import Overlay, StatsOverlay # type: ignore
 except ImportError as e:
     print(f"Warning: {e}")
     
@@ -117,7 +118,7 @@ class UDPListener(threading.Thread):
 
     def run(self):
         while True:
-            data, addr = self.udp.recvfrom(4096)
+            data, _ = self.udp.recvfrom(4096)
             
             # Ignore any data of invalid size:
             if len(data) < HEADER_SIZE:
@@ -222,6 +223,17 @@ class UDPListener(threading.Thread):
                     self.current_sector = sector
                     self.recording = self.current_lap > 0
 
+            # Event telemetry (Race Control):
+            if packet_id == 3 and self.recording:
+                if len(data) >= HEADER_SIZE + 4:
+                    event_data = struct.unpack("<4s", data[HEADER_SIZE:HEADER_SIZE+4])
+                    event_string_code = event_data[0].decode('utf-8', errors='ignore')
+                    # List of events that usually trigger a top-center UI popup:
+                    ui_popups = ["RCWN", "PENA", "DRSE", "DRSD", "CHQF"] 
+                    if event_string_code in ui_popups:
+                        self.current_telemetry["last_ui_popup_time"] = time.time()
+                        print(f"Detected UI Popup: {event_string_code}")
+
             # Car Telemetry
             if packet_id == 6 and self.recording:
                 player_offset = HEADER_SIZE + (player_car_index * 33)
@@ -301,6 +313,19 @@ class UDPListener(threading.Thread):
         df["year"] = "2026" # placeholder - year value doesn't really matter for game telemetry
         df["lap_id"] = filename
 
+        # Check to see if lap is a new PB; if so, save all telemetry features:
+        lap_time = df["time"].max()
+        if lap_time > 0 and lap_time < getattr(self, "session_best_time", float("inf")):
+            self.session_best_time = lap_time
+            print(f"*** NEW SESSION PERSONAL BEST: {lap_time:.2f}s ***")
+            # Save features with respect to centreline for accurate comparisons:
+            df_pb = df_raw.sort_values("cl_dist")
+            self.pb_distances = df_pb["cl_dist"].values
+            self.pb_speeds = pd.to_numeric(df_pb["speed"], errors="coerce").fillna(0).values
+            self.pb_brake = df_pb["brake"].astype(float).values
+            self.pb_throttle = df_pb["throttle"].astype(float).values
+            self.pb_times = df_pb["laptime"].astype(float).values 
+
         # Save telemetry to CSV:
         df.to_csv(filename, index=False)
         print(f"Saved {filename} with {len(df)} points")
@@ -314,6 +339,7 @@ if __name__ == "__main__":
     listener.start()
     # Initialise the GUI on the main thread:
     overlay = Overlay(listener)
-    overlay.show()
+    stats_overlay = StatsOverlay(listener, overlay)
+    overlay.show(); stats_overlay.show()
     # Run:
     sys.exit(app.exec())
