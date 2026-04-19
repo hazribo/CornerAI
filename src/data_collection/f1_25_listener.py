@@ -301,6 +301,18 @@ class UDPListener(threading.Thread):
         df["year"] = "2026" # placeholder - year value doesn't really matter for game telemetry
         df["lap_id"] = filename
 
+        # Check to see if lap is a new PB; if so, save all telemetry features:
+        lap_time = df["time"].max()
+        if lap_time > 0 and lap_time < getattr(self, "session_best_time", float("inf")):
+            self.session_best_time = lap_time
+            print(f"*** NEW SESSION PERSONAL BEST: {lap_time:.2f}s ***")
+            # Save features with respect to centreline for accurate comparisons:
+            df_pb = df_raw.sort_values("cl_dist")
+            self.pb_distances = df_pb["cl_dist"].values
+            self.pb_speeds = pd.to_numeric(df_pb["speed"], errors="coerce").fillna(0).values
+            self.pb_brake = df_pb["brake"].astype(float).values
+            self.pb_throttle = df_pb["throttle"].astype(float).values
+
         # Save telemetry to CSV:
         df.to_csv(filename, index=False)
         print(f"Saved {filename} with {len(df)} points")

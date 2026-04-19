@@ -2,6 +2,7 @@ from PyQt6.QtWidgets import QApplication, QWidget
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QGuiApplication, QPainter, QColor, QPen, QBrush
 import numpy as np
+import keyboard # for hotkeys
 
 class Overlay(QWidget):
     def __init__(self, listener):
@@ -16,6 +17,11 @@ class Overlay(QWidget):
         self.expected_speed = 0
         self.diff = 0
         self.dist_to_brake = None
+
+        # Mode settings:
+        self.mode = "optimal" # default - compare against gt optimum
+        self.mode_prefix = "Opt:"
+        keyboard.add_hotkey("F9", self.toggle_mode)
 
         self.setup_ui()
         
@@ -38,21 +44,51 @@ class Overlay(QWidget):
         w, h = 600, 100
         self.setGeometry((screen.width() - w) // 2, 50, w, h)
 
+    def toggle_mode(self):
+        if self.mode == "optimal":
+            if hasattr(self.listener, "pb_distances") and len(self.listener.pb_distances) > 0:
+                self.mode = "pb"
+                self.mode_prefix = "PB:"
+                print("Delta mode switched to Personal Best.")
+            else:
+                print("Cannot switch mode: No laps recorded in this session.")
+
+        else:
+            self.mode = "optimal"
+            self.mode_prefix = "Opt:"
+            print("Delta mode switched to GT Optimum.")
+
+
     def update_overlay(self):
         tel = self.listener.current_telemetry
         live_dist = tel.get("cl_dist", 0) 
         self.live_speed = tel.get("speed", 0)
-        self.exp_brake = tel.get("exp_brake", 0)
-        self.exp_throttle = tel.get("exp_throttle", 0)
         self.dist_to_brake = None
-        
-        # Interpolate expected speed:
-        if len(self.listener.gt_distances) > 0 and live_dist > 0:
-            self.expected_speed = np.interp(live_dist, self.listener.gt_distances, self.listener.gt_speeds)
-            self.diff = self.live_speed - self.expected_speed
+
+        # Decide which reference arrays to use based on mode:
+        if getattr(self, "mode", "optimal") == "pb" and hasattr(self.listener, "pb_distances"):
+            ref_dists = self.listener.pb_distances
+            ref_speeds = self.listener.pb_speeds
+            ref_brake = self.listener.pb_brake
+            ref_throttle = self.listener.pb_throttle
         else:
-            self.expected_speed = 0
-            self.diff = 0
+            ref_dists = self.listener.gt_distances
+            ref_speeds = self.listener.gt_speeds
+            ref_brake = getattr(self.listener, "gt_brake_exp", [])
+            ref_throttle = getattr(self.listener, "gt_throttle_exp", [])
+        
+        # Interpolate all features:
+        if len(ref_dists) > 0 and live_dist > 0:
+            self.expected_speed = np.interp(live_dist, ref_dists, ref_speeds)
+            self.diff = self.live_speed - self.expected_speed
+            
+            if len(ref_brake) > 0:
+                self.exp_brake = np.interp(live_dist, ref_dists, ref_brake)
+                self.exp_throttle = np.interp(live_dist, ref_dists, ref_throttle)
+            else:
+                self.exp_brake = self.exp_throttle = 0
+        else:
+            self.expected_speed = self.diff = self.exp_brake = self.exp_throttle = 0
 
         # Identify upcoming braking zone:
         upcoming_zone = None
@@ -140,7 +176,7 @@ class Overlay(QWidget):
         text_y = 35
         painter.setPen(QPen(QColor(255, 255, 255)))
         painter.drawText(20, text_y, f"{self.live_speed:.0f} km/h")
-        target_text = f"Target: {self.expected_speed:.0f} km/h" if self.expected_speed > 0 else "No Target"
+        target_text = f"{getattr(self, 'mode_prefix', 'Opt:')} {self.expected_speed:.0f} km/h" if self.expected_speed > 0 else "No Target"
         painter.drawText(self.width() - 170, text_y, target_text)
 
         # Centre the delta text:
