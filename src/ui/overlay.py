@@ -42,6 +42,8 @@ class Overlay(QWidget):
         tel = self.listener.current_telemetry
         live_dist = tel.get("cl_dist", 0) 
         self.live_speed = tel.get("speed", 0)
+        self.exp_brake = tel.get("exp_brake", 0)
+        self.exp_throttle = tel.get("exp_throttle", 0)
         self.dist_to_brake = None
         
         # Interpolate expected speed:
@@ -88,6 +90,16 @@ class Overlay(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Colour overlay based on expected car state:
+        bg_alpha = 255
+        if getattr(self, "exp_brake", 0) > 0.4:
+            bg_color = QColor(255, 0, 0, bg_alpha) # Brake: Red
+        elif getattr(self, "exp_throttle", 0) > 0.4:
+            bg_color = QColor(0, 255, 0, bg_alpha) # Throttle: Green
+        else:
+            bg_color = QColor(100, 100, 100, bg_alpha) # Cornering: Grey
+        painter.fillRect(self.rect(), bg_color)
 
         # Draw translucent background:
         painter.setBrush(QBrush(QColor(0, 0, 0, 180)))

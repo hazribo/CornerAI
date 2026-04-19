@@ -95,6 +95,9 @@ class UDPListener(threading.Thread):
             coords = self.gt_df[["x_exp", "y_exp"]].values
             self.gt_tree = cKDTree(coords)
             self.gt_cl_dists = self.gt_df["cl_dist"].values
+            # brake and throttle states for overlay colouring:
+            self.gt_brake_exp = self.gt_df["brake_exp"].values
+            self.gt_throttle_exp = self.gt_df["throttle_exp"].values
             
             # Use your existing advice logic to get the AI braking points:
             ref_brake = build_references_from_gt(self.gt_df, mode="brake")
@@ -139,13 +142,16 @@ class UDPListener(threading.Thread):
                     })
                 # Map real-time position to the nearest ground truth centerline distance
                 if hasattr(self, 'gt_tree'):
-                    # Apply your axis swapping to match Ground Truth
                     real_x = motion[2] # z_pos
                     real_y = motion[0] # x_pos
                     
                     # Find the index of the closest centerline coordinate:
                     _, nearest_idx = self.gt_tree.query([real_x, real_y])
+                    # Get cl_dist, expected brake, and expected throttle from this index:
                     self.current_telemetry["cl_dist"] = float(self.gt_cl_dists[nearest_idx])
+                    self.current_telemetry["exp_brake"] = float(self.gt_brake_exp[nearest_idx])
+                    self.current_telemetry["exp_throttle"] = float(self.gt_throttle_exp[nearest_idx])
+                    
                     # Only record if lap distance is positive:
                     if self.current_telemetry.get("lap_distance", -1.0) >= 0.0:
                         self.lap_data.append(self.current_telemetry.copy())
