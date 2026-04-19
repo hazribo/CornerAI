@@ -40,7 +40,7 @@ class Overlay(QWidget):
 
     def update_overlay(self):
         tel = self.listener.current_telemetry
-        live_dist = tel.get("lap_distance", 0)
+        live_dist = tel.get("cl_dist", 0) 
         self.live_speed = tel.get("speed", 0)
         self.dist_to_brake = None
         

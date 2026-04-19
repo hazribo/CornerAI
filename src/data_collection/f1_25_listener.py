@@ -6,6 +6,7 @@ import pandas as pd
 import threading
 import numpy as np
 from PyQt6.QtWidgets import QApplication
+from scipy.spatial import cKDTree
 # Add src/modelling to path to load model/advice files:
 import sys
 from pathlib import Path
@@ -91,6 +92,9 @@ class UDPListener(threading.Thread):
             self.gt_df = pd.read_csv(gt_path)
             self.gt_distances = self.gt_df["cl_dist"].values
             self.gt_speeds = self.gt_df["speed_exp"].values
+            coords = self.gt_df[["x_exp", "y_exp"]].values
+            self.gt_tree = cKDTree(coords)
+            self.gt_cl_dists = self.gt_df["cl_dist"].values
             
             # Use your existing advice logic to get the AI braking points:
             ref_brake = build_references_from_gt(self.gt_df, mode="brake")
@@ -133,6 +137,15 @@ class UDPListener(threading.Thread):
                         "y_pos": motion[1],
                         "z_pos": motion[2]
                     })
+                # Map real-time position to the nearest ground truth centerline distance
+                if hasattr(self, 'gt_tree'):
+                    # Apply your axis swapping to match Ground Truth
+                    real_x = motion[2] # z_pos
+                    real_y = motion[0] # x_pos
+                    
+                    # Find the index of the closest centerline coordinate:
+                    _, nearest_idx = self.gt_tree.query([real_x, real_y])
+                    self.current_telemetry["cl_dist"] = float(self.gt_cl_dists[nearest_idx])
                     # Only record if lap distance is positive:
                     if self.current_telemetry.get("lap_distance", -1.0) >= 0.0:
                         self.lap_data.append(self.current_telemetry.copy())
