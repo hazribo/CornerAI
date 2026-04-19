@@ -204,3 +204,90 @@ class Overlay(QWidget):
         if self.dist_to_brake is not None and 0 < self.dist_to_brake <= 150:
             painter.setPen(QPen(QColor(255, 165, 0))) # Orange "warning" colour?
             painter.drawText(center_x - 70, text_y - 20, f"BRAKE IN {self.dist_to_brake:.0f}m")
+
+class StatsOverlay(QWidget):
+    def __init__(self, listener, main_overlay):
+        super().__init__()
+        self.listener = listener
+        self.main_overlay = main_overlay # Keep reference to know the current mode
+        self.setup_ui()
+        # Timer settings:
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update)
+        self.timer.start(33) # ~30fps, fine for the stats overlay
+
+    def setup_ui(self):
+        self.setWindowFlags(
+            Qt.WindowType.WindowStaysOnTopHint | 
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowTransparentForInput
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        
+        screen = QGuiApplication.primaryScreen().geometry()
+        w, h = 250, 200
+        # RHS - vertically aligned to centre:
+        self.setGeometry(screen.width() - w - 20, (screen.height() - h) // 2, w, h)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Translucent dark background:
+        painter.setBrush(QBrush(QColor(0, 0, 0, 200)))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(0, 0, self.width(), self.height(), 10, 10)
+
+        pb_time = getattr(self.listener, "session_best_time", float("inf"))
+        laps = self.listener.current_lap
+        time_diff = getattr(self.main_overlay, "time_delta", 0.0)
+
+        # M:SS.ms formatter
+        def format_time(t):
+            m = int(t // 60)
+            s = t % 60
+            return f"{m}:{s:06.3f}"
+        pb_str = format_time(pb_time) if pb_time != float("inf") else "No PB yet"
+        
+        # Define the base rows (always visible):
+        stats_rows = [
+            ("Target Mode:", self.main_overlay.mode.upper(), QColor(255, 215, 0)),
+            ("Laps Driven:", str(laps), QColor(255, 255, 255)),
+            ("Session PB:", pb_str, QColor(0, 255, 0) if pb_time != float("inf") else QColor(150, 150, 150)),
+        ]
+
+        # Add time delta to state if in PB mode:
+        if self.main_overlay.mode == "pb":
+            # Color coding for time diff:
+            if time_diff < -0.05:
+                delta_str = f"{time_diff:+.3f}s"
+                delta_color = QColor(50, 255, 50)
+            elif time_diff > 0.05:
+                delta_str = f"{time_diff:+.3f}s"
+                delta_color = QColor(255, 50, 50)
+            else:
+                delta_str = f"{time_diff:+.3f}s"
+                delta_color = QColor(255, 255, 255)
+            stats_rows.append(("Time Delta:", delta_str, delta_color))
+
+        # Render header:
+        y_pos = 30
+        painter.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        painter.setPen(QPen(QColor(255, 255, 255)))
+        painter.drawText(15, y_pos, "SESSION STATS")
+        painter.drawLine(15, y_pos + 5, self.width() - 15, y_pos + 5)
+        
+        # Render all rows:
+        y_pos += 35
+        painter.setFont(QFont("Arial", 10, QFont.Weight.Normal))
+        for label, value, color in stats_rows:
+            painter.setPen(QPen(QColor(200, 200, 200))) 
+            painter.drawText(15, y_pos, label)
+            painter.setPen(QPen(color))                 
+            painter.drawText(120, y_pos, value)
+            y_pos += 35
+            
+        # F9 tooltip at bottom of stats box:
+        painter.setFont(QFont("Arial", 8, italic=True))
+        painter.setPen(QPen(QColor(150, 150, 150)))
+        painter.drawText(15, self.height() - 15, "Press F9 to toggle PB/Optimal comparison.")

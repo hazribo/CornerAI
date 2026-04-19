@@ -19,7 +19,7 @@ try:
     from game_model import RandomForestModel, Curvature, project_to_centreline, add_should_brake, add_should_throttle # type: ignore
     from game_advice import build_references_from_gt, advice, write_advice # type: ignore
     from track_plots import PlotTrackMaps # type: ignore
-    from overlay import Overlay # type: ignore
+    from overlay import Overlay, StatsOverlay # type: ignore
 except ImportError as e:
     print(f"Warning: {e}")
     
@@ -338,6 +338,7 @@ if __name__ == "__main__":
     listener.start()
     # Initialise the GUI on the main thread:
     overlay = Overlay(listener)
-    overlay.show()
+    stats_overlay = StatsOverlay(listener, overlay)
+    overlay.show(); stats_overlay.show()
     # Run:
     sys.exit(app.exec())
