@@ -2,6 +2,7 @@ import socket
 import struct
 from datetime import datetime
 import pandas as pd
+import time
 # imports for real-time/overlay:
 import threading
 import numpy as np
@@ -117,7 +118,7 @@ class UDPListener(threading.Thread):
 
     def run(self):
         while True:
-            data, addr = self.udp.recvfrom(4096)
+            data, _ = self.udp.recvfrom(4096)
             
             # Ignore any data of invalid size:
             if len(data) < HEADER_SIZE:
@@ -221,6 +222,17 @@ class UDPListener(threading.Thread):
                     self.current_lap = lap_number
                     self.current_sector = sector
                     self.recording = self.current_lap > 0
+
+            # Event telemetry (Race Control):
+            if packet_id == 3 and self.recording:
+                if len(data) >= HEADER_SIZE + 4:
+                    event_data = struct.unpack("<4s", data[HEADER_SIZE:HEADER_SIZE+4])
+                    event_string_code = event_data[0].decode('utf-8', errors='ignore')
+                    # List of events that usually trigger a top-center UI popup:
+                    ui_popups = ["RCWN", "PENA", "DRSE", "DRSD", "CHQF"] 
+                    if event_string_code in ui_popups:
+                        self.current_telemetry["last_ui_popup_time"] = time.time()
+                        print(f"Detected UI Popup: {event_string_code}")
 
             # Car Telemetry
             if packet_id == 6 and self.recording:

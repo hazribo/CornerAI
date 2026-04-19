@@ -2,6 +2,7 @@ from PyQt6.QtWidgets import QApplication, QWidget
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QGuiApplication, QPainter, QColor, QPen, QBrush
 import numpy as np
+import time
 import keyboard # for hotkeys
 
 class Overlay(QWidget):
@@ -61,6 +62,9 @@ class Overlay(QWidget):
 
     def update_overlay(self):
         tel = self.listener.current_telemetry
+        screen = QGuiApplication.primaryScreen().geometry()
+        w, h = 600, 100; center_x = (screen.width() - w) // 2
+        # Get live centreline distance and speed; initialise dist_to_brake:
         live_dist = tel.get("cl_dist", 0) 
         self.live_speed = tel.get("speed", 0)
         self.dist_to_brake = None
@@ -89,6 +93,18 @@ class Overlay(QWidget):
                 self.exp_brake = self.exp_throttle = 0
         else:
             self.expected_speed = self.diff = self.exp_brake = self.exp_throttle = 0
+
+        # Check for race control notices:
+        last_popup_time = tel.get("last_ui_popup_time", 0)
+        is_popup_active = (time.time() - last_popup_time) < 6.0 
+        
+        if is_popup_active:
+            target_y = 150  # Shift down below alert
+        else:
+            target_y = 50   # Default position
+
+        if self.y() != target_y:
+            self.setGeometry(center_x, target_y, w, h)
 
         # Identify upcoming braking zone:
         upcoming_zone = None
