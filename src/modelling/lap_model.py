@@ -13,6 +13,7 @@ import joblib
 
 HISTORICAL_PROCESSED_DIR = Path(__file__).resolve().parents[2] / "data" / "processed" / "historical"
 MODEL_OUTPUT_DIR = Path(__file__).resolve().parents[2] / "data" / "models" / "historical"
+MODEL_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 # Cache for processed historical data:
 CACHE_DIR = Path(__file__).resolve().parents[2] / "data" / "cache" / "historical"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -33,8 +34,8 @@ FEATURE_COLS = ["distance", "x", "y", "z",
                 ]
 
 LABELS = {
-    "brake_threshold": 0.1,
-    "brake_lift_min": 0.05,
+    "brake_threshold": 0.05,
+    "brake_lift_min": 0.02,
     "throttle_lift_min": 0.1,
     "throttle_threshold": 0.2,
     "brake_window_min": 25.0, # larger brake window than game model - adjusted for 4hz-20hz upsampling.
@@ -48,6 +49,7 @@ def load_build_cache(
     if cache_path.exists() and not rebuild:
         return pd.read_pickle(cache_path)
 
+    print(f"Building cache - historical laps.")
     df = load_historical_laps()
     df = Curvature.add_curv_cols(df, n_cols=N_COLS_DEFAULT, dist_interval=50) 
     df = add_labels(df, LABELS)
