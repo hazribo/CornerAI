@@ -71,6 +71,7 @@ class UDPListener(threading.Thread):
         self.gt_df = None
         self.gt_distances = np.array([])
         self.gt_speeds = np.array([])
+        self.session_best_time = float("inf")
         
         # All required variables/values:
         self.current_lap = 0
@@ -215,7 +216,7 @@ class UDPListener(threading.Thread):
 
                     if lap_number > self.current_lap and self.current_lap > 0:
                         filename = self.session_dir / f"lap_{self.current_lap}.csv"
-                        self.save_lap_csv(filename, self.lap_data)
+                        self.save_lap_csv(filename, self.lap_data, exact_lap_time_ms=lap_time_ms)
                         self.lap_data = []
                         self.lap_start_time = session_time
             
@@ -277,7 +278,7 @@ class UDPListener(threading.Thread):
         PlotTrackMaps.plot_lap_comparison(user_df=player_lap, gt_df=gt, track_name=str(target_track), out_dir=output_dir)
         print(f"Saved lap comparison plots to {advice_path}.")
 
-    def save_lap_csv(self, filename, data_points):
+    def save_lap_csv(self, filename, data_points, exact_lap_time_ms=None):
         if not data_points:
             return
         
@@ -314,10 +315,13 @@ class UDPListener(threading.Thread):
         df["lap_id"] = filename
 
         # Check to see if lap is a new PB; if so, save all telemetry features:
-        lap_time = df["time"].max()
-        if lap_time > 0 and lap_time < getattr(self, "session_best_time", float("inf")):
+        if exact_lap_time_ms > 0:
+            lap_time = exact_lap_time_ms / 1000.0
+        else:
+            lap_time = df["time"].max()
+        if lap_time > 0 and lap_time < self.session_best_time:
             self.session_best_time = lap_time
-            print(f"*** NEW SESSION PERSONAL BEST: {lap_time:.2f}s ***")
+            print(f"*** NEW SESSION PERSONAL BEST: {lap_time:.3f}s ***")
             # Save features with respect to centreline for accurate comparisons:
             df_pb = df_raw.sort_values("cl_dist")
             self.pb_distances = df_pb["cl_dist"].values

@@ -130,14 +130,15 @@ class Overlay(QWidget):
             # Save distance to brake:
             self.dist_to_brake = optimal_brake_dist - live_dist
 
-            if self.last_dist < (optimal_brake_dist - 5) and live_dist >= (optimal_brake_dist - 5):
-                if not self.beeped_this_corner:
-                    QApplication.beep() # system default "beep" - can be replaced later.
+            zone_id = upcoming_zone["ai_brake_dist"]
+            if getattr(self, "current_zone_id", None) != zone_id:
+                self.current_zone_id = zone_id
+                self.beeped_this_corner = False
+
+            if self.dist_to_brake is not None and 0 < self.dist_to_brake <= 15:
+                if not getattr(self, "beeped_this_corner", False):
+                    QApplication.beep()
                     self.beeped_this_corner = True
-                    
-        # Reset corner beep latch for next lap:
-        elif self.beeped_this_corner and tel.get("throttle") == 1.0:
-            self.beeped_this_corner = False
             
         self.last_dist = live_dist
         # Trigger paintEvent - redraw UI with new values:
