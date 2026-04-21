@@ -19,7 +19,7 @@ try:
     from game_model import RandomForestModel, Curvature, project_to_centreline, add_should_brake, add_should_throttle # type: ignore
     from game_advice import build_references_from_gt, advice, write_advice # type: ignore
     from track_plots import PlotTrackMaps # type: ignore
-    from overlay import Overlay, StatsOverlay # type: ignore
+    from overlay import Overlay, StatsOverlay, AdviceOverlay # type: ignore
 except ImportError as e:
     print(f"Warning: {e}")
     
@@ -270,6 +270,7 @@ class UDPListener(threading.Thread):
         lap_df = add_should_throttle(player_lap, gt).sort_values("cl_dist")
 
         advice_df = advice(lap_df, ref_brake, ref_throttle, gt=gt)
+        self.latest_advice = advice_df # save for overlay display
         advice_path = output_dir / f"{target_lap_id}_advice.txt"
         write_advice(advice_df, advice_path, track_name=target_track, lap_id=filename)
         print(f"Saved advice to {advice_path}.")
@@ -344,6 +345,7 @@ if __name__ == "__main__":
     # Initialise the GUI on the main thread:
     overlay = Overlay(listener)
     stats_overlay = StatsOverlay(listener, overlay)
-    overlay.show(); stats_overlay.show()
+    advice_overlay = AdviceOverlay(listener)
+    overlay.show(); stats_overlay.show(); advice_overlay.show()
     # Run:
     sys.exit(app.exec())
