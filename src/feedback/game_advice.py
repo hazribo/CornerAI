@@ -180,12 +180,14 @@ def advice(lap: pd.DataFrame, ref_brake: list[float], ref_throttle: list[float],
 
         # Get braking marks for advice:
         if player_b_dist is not None:
-            brake_marks = f"\n     Braking mark: {player_b_dist:.1f}m (Expected: {corner['ai_brake']:.1f}m)"
+            dist_delta = int(player_b_dist - corner["ai_brake"])
+            brake_marks = f"\n     (True distance delta: {dist_delta:+.0f}m)"
         else:
-            brake_marks = f"\n     Braking mark: Missed (Expected: {corner['ai_brake']:.1f}m)"
+            brake_marks = f""
         
         # Combine all feedback strings:
-        advice_text = f"{dist_str} (Entry speed: {p_entry_speed:.0f}km/h vs Expected: {ai_entry_speed:.0f}km/h){brake_marks}\n     {throttle_str}"
+        delta_speed = p_entry_speed - ai_entry_speed
+        advice_text = f"{dist_str} (Delta: {delta_speed:+.0f}km/h){brake_marks}\n     {throttle_str}"
         
         rows.append({
             "corner_id": corner["corner_id"],
