@@ -1,6 +1,7 @@
 from pathlib import Path
 import numpy as np
 import pandas as pd
+from corner_info import get_corner_no
 
 def _get_threshold_crossings(distance_array, signal_array, threshold=0.5):
     if len(signal_array) < 2:
@@ -55,7 +56,7 @@ def nearest_event(lap: float, refs: list[float]):
     best = float(array[i])
     return best if abs(best - float(lap)) <= tolerance else None
 
-def advice(lap: pd.DataFrame, ref_brake: list[float], ref_throttle: list[float], gt: pd.DataFrame = None):
+def advice(lap: pd.DataFrame, ref_brake: list[float], ref_throttle: list[float], gt: pd.DataFrame = None, track_name = None):
     p_df = lap.sort_values("cl_dist").copy()
     dist = p_df["cl_dist"].to_numpy(dtype=float)
     
@@ -80,9 +81,21 @@ def advice(lap: pd.DataFrame, ref_brake: list[float], ref_throttle: list[float],
         # Find AI first throttle use:
         ai_throttles_in_seg = [t for t in ref_throttle if seg_start < t < seg_end]
         ai_throttle_dist = ai_throttles_in_seg[0] if ai_throttles_in_seg else None
-            
+
+        # Get turn numbers for this zone:
+        corners_df = get_corner_no(track_name)
+        if corners_df is not None and not corners_df.empty:
+            start_idx = (corners_df["Distance"] - seg_start).abs().idxmin()
+            start_turn = corners_df.loc[start_idx, "Number"]
+            end_idx = (corners_df["Distance"] - seg_end).abs().idxmin()
+            end_turn = corners_df.loc[end_idx, "Number"]
+            if start_turn == end_turn:
+                turn_label = f"Turn {start_turn}"
+            else:
+                turn_label = f"Turns {start_turn}-{end_turn}"
+
         corner_segments.append({
-            "corner_id": i + 1,
+            "corner_id": turn_label,
             "ai_brake": b_dist,
             "ai_throttle": ai_throttle_dist,
             "seg_start": seg_start,

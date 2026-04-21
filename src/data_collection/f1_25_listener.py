@@ -15,11 +15,13 @@ src_dir = Path(__file__).resolve().parents[1]
 sys.path.append(str(src_dir / "modelling")) 
 sys.path.append(str(src_dir / "feedback")) 
 sys.path.append(str(src_dir / "ui"))
+sys.path.append(str(src_dir / "feedback"))
 from game_model import RandomForestModel, Curvature, project_to_centreline, add_should_brake, add_should_throttle # type: ignore
 from game_advice import build_references_from_gt, advice, write_advice # type: ignore
 from track_plots import PlotTrackMaps # type: ignore
 from overlay import Overlay, StatsOverlay, AdviceOverlay # type: ignore
-    
+from corner_info import get_corner_no # type: ignore
+
 UDP_IP = "127.0.0.1"
 UDP_PORT = 20777
 HEADER_SIZE = 29
@@ -60,7 +62,7 @@ if model_path.exists():
         model = RandomForestModel.load_model(model_path)
         print(f"Loading model from {model_path}.")
     except FileExistsError as e:
-        print(f"Warning: {e}")                      
+        print(f"Warning: {e}")                
 
 class UDPListener(threading.Thread):
     def __init__(self):
@@ -84,6 +86,9 @@ class UDPListener(threading.Thread):
         self.udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.udp.bind((UDP_IP, UDP_PORT))
         print("Listening on " + UDP_IP + ":" + str(UDP_PORT))
+
+        # Preload corner data:
+        threading.Thread(target=self.preload_corners, daemon=True).start()
         
     def load_ground_truth(self, track_name):
         gt_path = models_dir / f"{track_name}_ground_truth.csv"
@@ -246,6 +251,13 @@ class UDPListener(threading.Thread):
                         "rpm": tel[6],
                         "drs": tel[7]
                     })
+
+    # Pre-load circuit corner data distances via FastF1 for all tracks:
+    def preload_corners(self):
+        print("Loading 2025 corner data (via FastF1)...")
+        for _, track_name in TRACK_IDS.items():
+            get_corner_no(track_name)
+        print("All corner data loaded.")
 
     def get_advice(self, filename: Path, df: pd.DataFrame):
         target_track = df["track"].iloc[0]
