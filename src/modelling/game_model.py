@@ -5,7 +5,6 @@ import time
 import re
 # other file imports:
 from track_plots import PlotTrackMaps
-from game_advice import build_references_from_gt, advice, write_advice
 from model_utils import Curvature, build_centreline, project_to_centreline, build_track_ground_truth, add_should_brake, add_should_throttle, add_labels
 # model imports:
 from sklearn.model_selection import GroupShuffleSplit
