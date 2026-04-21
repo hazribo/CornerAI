@@ -214,6 +214,7 @@ class StatsOverlay(QWidget):
     def __init__(self, listener, main_overlay):
         super().__init__()
         self.listener = listener
+        self.drag_position = None # for repositioning
         self.main_overlay = main_overlay # Keep reference to know the current mode
         self.setup_ui()
         # Timer settings:
@@ -224,8 +225,7 @@ class StatsOverlay(QWidget):
     def setup_ui(self):
         self.setWindowFlags(
             Qt.WindowType.WindowStaysOnTopHint | 
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.WindowTransparentForInput
+            Qt.WindowType.FramelessWindowHint 
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
@@ -233,6 +233,23 @@ class StatsOverlay(QWidget):
         w, h = 250, 200
         # RHS - vertically aligned to centre:
         self.setGeometry(screen.width() - w - 20, (screen.height() - h) // 2, w, h)
+
+    # FOR MOVING SESSION STATS BOX WITH MOUSE:
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            # Calculate the offset from the top-left of the widget to where we clicked
+            self.drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.MouseButton.LeftButton and self.drag_position is not None:
+            # Move the window tracking the mouse position minus the original offset
+            self.move(event.globalPosition().toPoint() - self.drag_position)
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        self.drag_position = None
+        event.accept()
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -296,3 +313,79 @@ class StatsOverlay(QWidget):
         painter.setFont(QFont("Arial", 8, italic=True))
         painter.setPen(QPen(QColor(150, 150, 150)))
         painter.drawText(15, self.height() - 15, "Press F9 to toggle PB/Optimal comparison.")
+
+class AdviceOverlay(QWidget):
+    def __init__(self, listener):
+        super().__init__()
+        self.listener = listener
+        self.drag_position = None
+        self.setup_ui()
+        
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update)
+        self.timer.start(1000) # once a second
+
+    def setup_ui(self):
+        self.setWindowFlags(
+            Qt.WindowType.WindowStaysOnTopHint | 
+            Qt.WindowType.FramelessWindowHint 
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        
+        screen = QGuiApplication.primaryScreen().geometry()
+        w, h = 250, 250
+        # Default pos: under stats box
+        stats_h = 200
+        start_y = ((screen.height() - stats_h) // 2) + stats_h + 5
+        self.setGeometry(screen.width() - w - 20, start_y, w, h)
+
+    # MOUSE EVENTS FOR MOVING ADVICE BOX:
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.MouseButton.LeftButton and self.drag_position is not None:
+            self.move(event.globalPosition().toPoint() - self.drag_position)
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        self.drag_position = None
+        event.accept()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        painter.setBrush(QBrush(QColor(0, 0, 0, 200)))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(0, 0, self.width(), self.height(), 10, 10)
+
+        advice_df = getattr(self.listener, "latest_advice", None)
+        
+        y_pos = 30
+        painter.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        painter.setPen(QPen(QColor(255, 215, 0)))
+        painter.drawText(15, y_pos, "TOP 3 SUGGESTIONS")
+        painter.drawLine(15, y_pos + 5, self.width() - 15, y_pos + 5)
+        
+        y_pos += 25
+        
+        if advice_df is None or advice_df.empty:
+            painter.setFont(QFont("Arial", 10, italic=True))
+            painter.setPen(QPen(QColor(150, 150, 150)))
+            painter.drawText(15, y_pos, "Finish a lap to generate advice...")
+            return
+
+        painter.setFont(QFont("Arial", 9))
+        for i, row in advice_df.head(3).iterrows():
+            painter.setPen(QPen(QColor(255, 100, 100))) 
+            painter.drawText(15, y_pos, f"Braking Zone {row['corner_id']} (Lost {row['time_lost_s']:.2f}s)")
+            
+            painter.setPen(QPen(QColor(220, 220, 220))) 
+            for line in row["advice"].split('\n'):
+                y_pos += 16
+                painter.drawText(20, y_pos, line.strip())
+            
+            y_pos += 20 # Spacing before next corner
