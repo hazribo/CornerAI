@@ -119,6 +119,17 @@ class UDPListener(threading.Thread):
                     
             print(f"Loaded ground truth for {track_name} with {len(self.ai_braking_zones)} braking zones")
 
+    def new_session(self, session_time, sector):
+        self.session_dir = output_dir / datetime.now().strftime("%Y_%m_%d_%H%M%S")
+        self.session_dir.mkdir(parents=True, exist_ok=True)
+        self.lap_data = []
+        self.current_lap = 0
+        self.lap_start_time = session_time
+        self.current_sector = sector
+        self.session_best_time = float("inf")
+        self.latest_advice = None
+        print("New session started.")
+
     def run(self):
         while True:
             data, _ = self.udp.recvfrom(4096)
@@ -184,20 +195,10 @@ class UDPListener(threading.Thread):
                     sector = lap_info[13] + 1  # Convert 0-indexed to 1-indexed
 
                     if self.session_dir is None:
-                        self.session_dir = output_dir / datetime.now().strftime("%Y_%m_%d_%H%M%S")
-                        self.session_dir.mkdir(parents=True, exist_ok=True)
-                        self.lap_data = []
-                        self.lap_start_time = session_time
-                        self.current_sector = sector
-                        print("New session started.")
+                        self.new_session(session_time, sector)
                     
                     if lap_number < self.current_lap:
-                        self.session_dir = output_dir / datetime.now().strftime("%Y_%m_%d_%H%M%S")
-                        self.session_dir.mkdir(parents=True, exist_ok=True)
-                        self.lap_data = []
-                        self.lap_start_time = session_time
-                        self.current_sector = sector
-                        print("New session started.")
+                        self.new_session(session_time, sector)
                     
                     if lap_number == self.current_lap and lap_distance < self.last_lap_distance - 500:
                         self.lap_data = []
