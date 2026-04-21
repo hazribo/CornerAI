@@ -69,6 +69,7 @@ class Overlay(QWidget):
         self.live_speed = tel.get("speed", 0)
         self.dist_to_brake = None
 
+        # GT brake/throttle truths should be used for both modes:
         # Decide which reference arrays to use based on mode:
         if getattr(self, "mode", "optimal") == "pb" and hasattr(self.listener, "pb_distances"):
             ref_dists = self.listener.pb_distances
@@ -151,12 +152,14 @@ class Overlay(QWidget):
         # Colour overlay based on expected car state:
         bg_alpha = 255
         if getattr(self, "exp_brake", 0) > 0.4:
-            bg_color = QColor(255, 0, 0, bg_alpha) # Brake: Red
+            bg_colour = QColor(255, 0, 0, bg_alpha) # Brake: Red
         elif getattr(self, "exp_throttle", 0) > 0.4:
-            bg_color = QColor(0, 255, 0, bg_alpha) # Throttle: Green
+            bg_colour = QColor(0, 255, 0, bg_alpha) # Throttle: Green
         else:
-            bg_color = QColor(100, 100, 100, bg_alpha) # Cornering: Grey
-        painter.fillRect(self.rect(), bg_color)
+            bg_colour = QColor(100, 100, 100, bg_alpha) # Cornering: Grey
+        painter.setBrush(QBrush(bg_colour))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(0, 0, self.width(), self.height(), 15, 15)
 
         # Draw translucent background:
         painter.setBrush(QBrush(QColor(0, 0, 0, 180)))
@@ -201,8 +204,8 @@ class Overlay(QWidget):
         painter.drawText(self.width() - 170, text_y, target_text)
 
         # Centre the delta text:
-        delta_color = QColor(0, 255, 0) if self.diff >= 0 else QColor(255, 0, 0)
-        painter.setPen(QPen(delta_color))
+        delta_colour = QColor(0, 255, 0) if self.diff >= 0 else QColor(255, 0, 0)
+        painter.setPen(QPen(delta_colour))
         painter.drawText(center_x - 15, text_y, f"{self.diff:+.0f}")
 
         # Draw braking point coutndown:
@@ -280,17 +283,17 @@ class StatsOverlay(QWidget):
 
         # Add time delta to state if in PB mode:
         if self.main_overlay.mode == "pb":
-            # Color coding for time diff:
+            # Colour coding for time diff:
             if time_diff < -0.05:
                 delta_str = f"{time_diff:+.3f}s"
-                delta_color = QColor(50, 255, 50)
+                delta_colour = QColor(50, 255, 50)
             elif time_diff > 0.05:
                 delta_str = f"{time_diff:+.3f}s"
-                delta_color = QColor(255, 50, 50)
+                delta_colour = QColor(255, 50, 50)
             else:
                 delta_str = f"{time_diff:+.3f}s"
-                delta_color = QColor(255, 255, 255)
-            stats_rows.append(("Time Delta:", delta_str, delta_color))
+                delta_colour = QColor(255, 255, 255)
+            stats_rows.append(("Time Delta:", delta_str, delta_colour))
 
         # Render header:
         y_pos = 30
@@ -302,10 +305,10 @@ class StatsOverlay(QWidget):
         # Render all rows:
         y_pos += 35
         painter.setFont(QFont("Arial", 10, QFont.Weight.Normal))
-        for label, value, color in stats_rows:
+        for label, value, colour in stats_rows:
             painter.setPen(QPen(QColor(200, 200, 200))) 
             painter.drawText(15, y_pos, label)
-            painter.setPen(QPen(color))                 
+            painter.setPen(QPen(colour))                 
             painter.drawText(120, y_pos, value)
             y_pos += 35
             
