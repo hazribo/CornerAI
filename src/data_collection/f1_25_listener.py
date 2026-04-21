@@ -3,25 +3,18 @@ import struct
 from datetime import datetime
 import pandas as pd
 import time
+import sys
+from pathlib import Path
 # imports for real-time/overlay:
 import threading
 import numpy as np
 from PyQt6.QtWidgets import QApplication
 from scipy.spatial import cKDTree
-# Add src/modelling to path to load model/advice files:
-import sys
-from pathlib import Path
-modelling_dir = Path(__file__).resolve().parents[1] / "modelling"
-ui_dir = Path(__file__).resolve().parents[1] / "ui"
-sys.path.append(str(modelling_dir))
-sys.path.append(str(ui_dir))
-try:
-    from game_model import RandomForestModel, Curvature, project_to_centreline, add_should_brake, add_should_throttle # type: ignore
-    from game_advice import build_references_from_gt, advice, write_advice # type: ignore
-    from track_plots import PlotTrackMaps # type: ignore
-    from overlay import Overlay, StatsOverlay, AdviceOverlay # type: ignore
-except ImportError as e:
-    print(f"Warning: {e}")
+# load model/advice/overlay files:
+from modelling.game_model import RandomForestModel, Curvature, project_to_centreline, add_should_brake, add_should_throttle 
+from feedback.game_advice import build_references_from_gt, advice, write_advice 
+from modelling.track_plots import PlotTrackMaps 
+from ui.overlay import Overlay, StatsOverlay, AdviceOverlay 
     
 UDP_IP = "127.0.0.1"
 UDP_PORT = 20777
