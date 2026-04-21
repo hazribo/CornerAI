@@ -71,6 +71,7 @@ class UDPListener(threading.Thread):
         self.gt_df = None
         self.gt_distances = np.array([])
         self.gt_speeds = np.array([])
+        self.session_best_time = float("inf")
         
         # All required variables/values:
         self.current_lap = 0
@@ -315,7 +316,7 @@ class UDPListener(threading.Thread):
 
         # Check to see if lap is a new PB; if so, save all telemetry features:
         lap_time = df["time"].max()
-        if lap_time > 0 and lap_time < getattr(self, "session_best_time", float("inf")):
+        if lap_time > 0 and lap_time < self.session_best_time:
             self.session_best_time = lap_time
             print(f"*** NEW SESSION PERSONAL BEST: {lap_time:.2f}s ***")
             # Save features with respect to centreline for accurate comparisons:
