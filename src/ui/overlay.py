@@ -135,8 +135,10 @@ class Overlay(QWidget):
             if getattr(self, "current_zone_id", None) != zone_id:
                 self.current_zone_id = zone_id
                 self.beeped_this_corner = False
-
-            if self.dist_to_brake is not None and 0 < self.dist_to_brake <= 15:
+            
+            # dynamically calculate whether beep should play based on current speed, avg human reaction time:
+            metres_before_beep = 0.18 * live_v_ms # 0.18s = average reaction time
+            if self.dist_to_brake is not None and 0 < self.dist_to_brake <= metres_before_beep:
                 if not getattr(self, "beeped_this_corner", False):
                     QApplication.beep()
                     self.beeped_this_corner = True
