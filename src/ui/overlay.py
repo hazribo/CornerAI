@@ -148,8 +148,6 @@ class Overlay(QWidget):
         self.update()
 
     def paintEvent(self, event):
-        if not self.listener.overlay_enabled:
-            return # insta-return to disable overlay
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
@@ -259,8 +257,6 @@ class StatsOverlay(QWidget):
         event.accept()
 
     def paintEvent(self, event):
-        if not self.listener.overlay_enabled:
-            return # insta-return to disable overlay
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
@@ -364,8 +360,6 @@ class AdviceOverlay(QWidget):
         event.accept()
 
     def paintEvent(self, event):
-        if not self.listener.overlay_enabled:
-            return # insta-return to disable overlay
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
