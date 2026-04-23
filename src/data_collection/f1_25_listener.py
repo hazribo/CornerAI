@@ -362,7 +362,7 @@ class UDPListener(threading.Thread):
             
             PlotSessionProgression.plot_laps(
                 self.session_lap_summary, 
-                df["track"], 
+                df["track"].iloc[0], 
                 self.session_dir
             )
 
