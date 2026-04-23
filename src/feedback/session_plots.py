@@ -47,14 +47,16 @@ class PlotSessionProgression:
                 hovertemplate="Lap %{x}<br>Time: %{y:.3f}s<extra></extra>"
             ))
 
+        highlight_size = 0.05 * len(session_lap_summary)
+        if highlight_size > 1.0: highlight_size = 1.0
         # Red highlighted column on invalid laps:
         if "lap_invalid" in df_summary.columns:
             invalid_laps = df_summary[df_summary["lap_invalid"] == True]
             for _, row in invalid_laps.iterrows():
                 lap_num = row["lap"]
                 fig.add_vrect(
-                    x0=lap_num - 0.05, 
-                    x1=lap_num + 0.05, 
+                    x0=lap_num - highlight_size, 
+                    x1=lap_num + highlight_size, 
                     fillcolor="red", 
                     opacity=0.15, 
                     layer="above", 
