@@ -4,6 +4,7 @@ from datetime import datetime
 import pandas as pd
 import time
 import sys
+import keyboard
 from pathlib import Path
 # imports for real-time/overlay:
 import threading
@@ -82,6 +83,8 @@ class UDPListener(threading.Thread):
         self.current_sector = 1
         self.current_telemetry = {}
         self.current_track_id = -1
+        self.overlay_enabled = True
+        keyboard.add_hotkey("ctrl", self.toggle_overlay)
         # Initialise UDP socket:
         self.udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.udp.bind((UDP_IP, UDP_PORT))
@@ -89,6 +92,10 @@ class UDPListener(threading.Thread):
 
         # Preload corner data:
         threading.Thread(target=self.preload_corners, daemon=True).start()
+
+    def toggle_overlay(self):
+        self.overlay_enabled = not self.overlay_enabled
+        print(f"Overlay enabled: {self.overlay_enabled}")
         
     def load_ground_truth(self, track_name):
         gt_path = models_dir / f"{track_name}_ground_truth.csv"
