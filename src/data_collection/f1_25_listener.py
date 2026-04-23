@@ -83,6 +83,7 @@ class UDPListener(threading.Thread):
         self.last_lap_distance = 0.0
         self.lap_start_time = 0.0
         self.current_sector = 1
+        self.is_lap_invalid = False
         self.current_telemetry = {}
         self.current_track_id = -1
         self.overlay_enabled = True
@@ -204,6 +205,11 @@ class UDPListener(threading.Thread):
                     lap_time_ms = lap_info[0]
                     lap_distance = lap_info[10]
                     sector = lap_info[13] + 1  # Convert 0-indexed to 1-indexed
+                    lap_invalid = lap_info[18] == 1
+
+                    if lap_invalid == True and self.is_lap_invalid == False:
+                        print(f"Lap {lap_number} invalid.") # debug print
+                    self.is_lap_invalid = lap_invalid
 
                     if self.session_dir is None:
                         self.new_session(session_time, sector)
@@ -227,6 +233,7 @@ class UDPListener(threading.Thread):
                     self.current_telemetry["lap_distance"] = lap_distance
                     self.current_telemetry["sector"] = sector
                     self.current_telemetry["laptime"] = (session_time - self.lap_start_time) if self.lap_start_time else 0
+                    self.current_telemetry["is_lap_invalid"] = self.is_lap_invalid
 
                     if lap_number > self.current_lap and self.current_lap > 0:
                         filename = self.session_dir / f"lap_{self.current_lap}.csv"
@@ -354,10 +361,14 @@ class UDPListener(threading.Thread):
         
         # Update session lap times plot:
         if self.current_lap > 0:
+            lap_was_invalid = False
+            if "is_lap_invalid" in df_raw.columns:
+                lap_was_invalid = df_raw["is_lap_invalid"].any()
             self.session_lap_summary.append({
                 "lap": self.current_lap,
                 "time": lap_time,
-                "overlay_active": self.overlay_enabled
+                "overlay_active": self.overlay_enabled,
+                "lap_invalid": bool(lap_was_invalid)
             })
             
             PlotSessionProgression.plot_laps(
