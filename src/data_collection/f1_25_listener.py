@@ -10,6 +10,7 @@ from pathlib import Path
 import threading
 import numpy as np
 from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import QTimer
 from scipy.spatial import cKDTree
 # load model/advice/overlay files:
 src_dir = Path(__file__).resolve().parents[1]
@@ -364,5 +365,22 @@ if __name__ == "__main__":
     stats_overlay = StatsOverlay(listener, overlay)
     advice_overlay = AdviceOverlay(listener)
     overlay.show(); stats_overlay.show(); advice_overlay.show()
+    
+    def check_overlay_visibility():
+        if listener.overlay_enabled:
+            if overlay.isHidden(): # Only call show() if currently hidden
+                overlay.show()
+                stats_overlay.show()
+                advice_overlay.show()
+        else:
+            if not overlay.isHidden(): # Only call hide() if currently visible
+                overlay.hide()
+                stats_overlay.hide()
+                advice_overlay.hide()
+    # Check state every 30ms:
+    visibility_timer = QTimer()
+    visibility_timer.timeout.connect(check_overlay_visibility)
+    visibility_timer.start(30)
+
     # Run:
     sys.exit(app.exec())
