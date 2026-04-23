@@ -23,6 +23,7 @@ from game_advice import build_references_from_gt, advice, write_advice # type: i
 from track_plots import PlotTrackMaps # type: ignore
 from overlay import Overlay, StatsOverlay, AdviceOverlay # type: ignore
 from corner_info import get_corner_no # type: ignore
+from session_plots import PlotSessionProgression # type: ignore 
 
 UDP_IP = "127.0.0.1"
 UDP_PORT = 20777
@@ -85,6 +86,7 @@ class UDPListener(threading.Thread):
         self.current_telemetry = {}
         self.current_track_id = -1
         self.overlay_enabled = True
+        self.session_lap_summary = []
         keyboard.add_hotkey("ctrl", self.toggle_overlay)
         # Initialise UDP socket:
         self.udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -136,6 +138,7 @@ class UDPListener(threading.Thread):
         self.current_sector = sector
         self.session_best_time = float("inf")
         self.latest_advice = None
+        self.session_lap_summary = []
         print("New session started.")
 
     def run(self):
@@ -348,6 +351,20 @@ class UDPListener(threading.Thread):
             self.pb_brake = df_pb["brake"].astype(float).values
             self.pb_throttle = df_pb["throttle"].astype(float).values
             self.pb_times = df_pb["laptime"].astype(float).values 
+        
+        # Update session lap times plot:
+        if self.current_lap > 0:
+            self.session_lap_summary.append({
+                "lap": self.current_lap,
+                "time": lap_time,
+                "overlay_active": self.overlay_enabled
+            })
+            
+            PlotSessionProgression.plot_laps(
+                self.session_lap_summary, 
+                df["track"].iloc[0], 
+                self.session_dir
+            )
 
         # Save telemetry to CSV:
         df.to_csv(filename, index=False)
