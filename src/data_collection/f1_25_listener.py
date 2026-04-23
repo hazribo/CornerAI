@@ -86,6 +86,7 @@ class UDPListener(threading.Thread):
         self.current_telemetry = {}
         self.current_track_id = -1
         self.overlay_enabled = True
+        self.session_lap_summary = []
         keyboard.add_hotkey("ctrl", self.toggle_overlay)
         # Initialise UDP socket:
         self.udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -137,6 +138,7 @@ class UDPListener(threading.Thread):
         self.current_sector = sector
         self.session_best_time = float("inf")
         self.latest_advice = None
+        self.session_lap_summary = []
         print("New session started.")
 
     def run(self):
